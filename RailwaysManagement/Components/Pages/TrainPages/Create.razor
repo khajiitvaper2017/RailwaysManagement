@@ -1,0 +1,72 @@
+﻿@page "/trains/create"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Створити</PageTitle>
+
+<h1>Створити</h1>
+
+<h2>Потяг</h2>
+<hr />
+<div class="row">
+    <div class="col-md-4">
+        <EditForm method="post" Model="Train" OnValidSubmit="AddTrain" FormName="create" Enhance>
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" role="alert"/>
+            <div class="mb-3">
+                <label for="name" class="form-label">Назва потяга:</label> 
+                <InputText id="name" @bind-Value="Train.Name" class="form-control" aria-required="true"/> 
+                <ValidationMessage For="() => Train.Name" class="text-danger" /> 
+            </div>        
+            <div class="mb-3">
+                <label for="maxcarscount" class="form-label">Максимальна кількість вагонів:</label> 
+                <InputNumber id="maxcarscount" @bind-Value="Train.MaxCarsCount" class="form-control" /> 
+                <ValidationMessage For="() => Train.MaxCarsCount" class="text-danger" /> 
+            </div>      
+            <div class="mb-3">
+                <label for="stationid" class="form-label">Станція приписки:</label> 
+                <InputSelect id="stationid" @bind-Value="Train.StationId" class="form-control">
+                    <option value="">Оберіть станцію</option>
+                    @foreach (var station in Stations)
+                    {
+                        <option value="@station.Id">
+                            @station.Name
+                            (Макс. вагонів: @station.MaxCars, Потягiв: @station.Trains.Count)
+                        </option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="() => Train.StationId" class="text-danger" />
+            </div>
+            <button type="submit" class="btn btn-primary">Створити</button>
+        </EditForm>
+    </div>
+</div>
+
+<div>
+    <a class="button-link" href="/trains">Повернутися до списку потягів</a>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    private Train Train { get; set; } = new();
+    private RailwaysDbContext _dbContext = default!;
+    private List<Station> Stations { get; set; } = new();
+
+    protected override void OnInitialized()
+    {
+        _dbContext = DbFactory.CreateDbContext();
+        Stations = _dbContext.Stations.Include(s => s.Trains).ToList();
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync() => await _dbContext.DisposeAsync();
+
+    private async Task AddTrain()
+    {
+        _dbContext.Trains.Add(Train);
+        await _dbContext.SaveChangesAsync();
+        NavigationManager.NavigateTo("/trains");
+    }
+}

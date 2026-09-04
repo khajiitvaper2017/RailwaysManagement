@@ -1,0 +1,125 @@
+﻿@using Microsoft.AspNetCore.Identity
+@using RailwaysManagement.DbModels
+@implements IDisposable
+@inject NavigationManager NavigationManager
+@inject SignInManager<RailwaysManagementUser> SignInManager
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<RailwaysManagementUser> UserManager
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">RailwaysManagement</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Меню навігації" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Головна
+            </NavLink>
+        </div>
+        <AuthorizeView Roles="Admin, Dispatcher">
+         <Authorized>
+	         <div class="nav-item px-3">
+		         <NavLink class="nav-link" href="stations">
+			         <span class="bi bi-geo-alt-fill-nav-menu" aria-hidden="true"></span> Станції
+		         </NavLink>
+	         </div>
+
+          <div class="nav-item px-3">
+           <NavLink class="nav-link" href="trains">
+            <span class="bi bi-train-front-fill-nav-menu" aria-hidden="true"></span> Потяги
+           </NavLink>
+          </div>
+          
+          <div class="nav-item px-3">
+           <NavLink class="nav-link" href="cargos">
+            <span class="bi bi-box-seam-fill-nav-menu" aria-hidden="true"></span> Вантажі
+           </NavLink>
+          </div>
+          
+          <div class="nav-item px-3">
+           <NavLink class="nav-link" href="routing">
+            <span class="bi bi-graph-up-arrow-nav-menu" aria-hidden="true"></span> Маршрутизація
+           </NavLink>
+          </div>
+         </Authorized>
+        </AuthorizeView>
+		<AuthorizeView Roles="Admin, Dispatcher, Client">
+			<Authorized>                
+                @if (appUser?.Location != null || appUser?.Role == UserRole.Admin || appUser?.Role == UserRole.Dispatcher)
+                {
+	                <div class="nav-item px-3">
+		                <NavLink class="nav-link" href="routerequests">
+			                <span class="bi bi-send-fill-nav-menu" aria-hidden="true"></span> Запити на маршрут
+		                </NavLink>
+	                </div>
+                }
+         </Authorized>
+        </AuthorizeView>
+        
+        <AuthorizeView Roles="Client">
+	        <Authorized>
+		        <div class="nav-item px-3">
+			        <NavLink class="nav-link" href="client/location/select">
+				        <span class="bi bi-geo-fill-nav-menu" aria-hidden="true"></span> Вибір точки
+			        </NavLink>
+		        </div>
+	        </Authorized>
+        </AuthorizeView>
+
+        <AuthorizeView>
+         <Authorized>
+          <div class="nav-item px-3">
+           <NavLink class="nav-link" href="Account/Manage">
+            <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> Керування
+           </NavLink>
+          </div>
+				<div class="nav-item px-3">
+					<NavLink href="Logout" Match="NavLinkMatch.All" class="nav-link">
+            <span class="bi bi-box-arrow-right-nav-menu" aria-hidden="true"></span> Вийти
+           </NavLink>
+          </div>
+         </Authorized>
+         <NotAuthorized>
+          <div class="nav-item px-3">
+           <NavLink class="nav-link" href="Account/Register">
+            <span class="bi bi-person-plus-fill-nav-menu" aria-hidden="true"></span> Реєстрація
+           </NavLink>
+          </div>
+
+          <div class="nav-item px-3">
+           <NavLink class="nav-link" href="Account/Login">
+            <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Вхід
+           </NavLink>
+          </div>
+         </NotAuthorized>
+        </AuthorizeView>
+    </nav>
+</div>
+
+@code {
+    private string? currentUrl;
+	private RailwaysManagementUser? appUser;
+
+    protected override void OnInitialized()
+    {
+		appUser = UserManager.GetUserAsync(AuthenticationStateProvider.GetAuthenticationStateAsync().Result.User).Result;
+        currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        currentUrl = NavigationManager.ToBaseRelativePath(e.Location);
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

@@ -1,0 +1,26 @@
+@using RailwaysManagement.DbModels
+
+@if (Station is null)
+{
+    <p><em>Завантаження...</em></p>
+}
+else
+{
+    <dl class="row">
+        <dt class="col-sm-2">ID</dt>
+        <dd class="col-sm-10">@Station.Id</dd>
+        <dt class="col-sm-2">Назва</dt>
+        <dd class="col-sm-10">@Station.Name</dd>
+        <dt class="col-sm-2">Локація</dt>
+        <dd class="col-sm-10">@Station.Location?.ToString()</dd>
+        <dt class="col-sm-2">Створено</dt>
+        <dd class="col-sm-10">@Station.CreatedAtUtc.ToString("dd.MM.yyyy HH:mm")</dd>
+        <dt class="col-sm-2">Змінено</dt>
+        <dd class="col-sm-10">@Station.LastModifiedAtUtc.ToString("dd.MM.yyyy HH:mm")</dd>
+    </dl>
+}
+
+@code {
+    [Parameter]
+    public Station? Station { get; set; }
+}

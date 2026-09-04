@@ -1,0 +1,53 @@
+@using RailwaysManagement.DbModels
+
+@if (Cargo is null)
+{
+    <p><em>Завантаження...</em></p>
+}
+else
+{
+    <dl class="row">
+        <dt class="col-sm-2">Назва</dt>
+        <dd class="col-sm-10">@Cargo.Name</dd>
+        
+        <dt class="col-sm-2">Кількість вагонів</dt>
+        <dd class="col-sm-10">@Cargo.WagonsCount</dd>
+        
+        @if (Cargo.RouteRequest != null)
+        {
+            <dt class="col-sm-2">Відправник</dt>
+            <dd class="col-sm-10">@Cargo.RouteRequest?.SenderClient?.Name</dd>
+            
+            <dt class="col-sm-2">Одержувач</dt>
+            <dd class="col-sm-10">@Cargo.RouteRequest?.ReceiverClient?.Name</dd>
+            
+            <dt class="col-sm-2">Термін доставки</dt>
+            <dd class="col-sm-10">@Cargo.RouteRequest.DeliveryDeadlineDate.ToString("yyyy-MM-dd")</dd>
+            
+            <dt class="col-sm-2">Станція відправника</dt>
+            <dd class="col-sm-10">
+                @if (Cargo.RouteRequest?.SenderClient?.AssignedStation != null)
+                {
+                    <a href="@($"stations/details?id={Cargo.RouteRequest.SenderClient.AssignedStation.Id}")">
+                        @Cargo.RouteRequest.SenderClient.AssignedStation.Name
+                    </a>
+                }
+                else
+                {
+                    <em>Not Assigned</em>
+                }
+            </dd>
+            
+            <dt class="col-sm-2">Дата створення</dt>
+            <dd class="col-sm-10">@Cargo.CreatedAtUtc.ToString("yyyy-MM-dd HH:mm")</dd>
+            
+            <dt class="col-sm-2">Остання зміна</dt>
+            <dd class="col-sm-10">@Cargo.LastModifiedAtUtc.ToString("yyyy-MM-dd HH:mm")</dd>
+        }
+    </dl>
+}
+
+@code {
+    [Parameter]
+    public Cargo? Cargo { get; set; }
+}

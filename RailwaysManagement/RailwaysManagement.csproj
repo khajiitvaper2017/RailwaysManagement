@@ -1,0 +1,52 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+	<PropertyGroup>
+		<InvariantGlobalization>false</InvariantGlobalization>
+        
+	</PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="geojson\**" />
+    <Content Remove="geojson\**" />
+    <EmbeddedResource Remove="geojson\**" />
+    <None Remove="geojson\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Ardalis.GuardClauses" Version="5.0.0" />
+    <PackageReference Include="AutoMapper" Version="14.0.0" />
+    <PackageReference Include="ClosedXML.Report" Version="0.2.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.QuickGrid" Version="9.0.5" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity" Version="2.3.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="9.0.5" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.UI" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.5" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.5" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="OSMJSON.Net" Version="1.2.1" />
+    <PackageReference Include="PolylineEncoder.Net" Version="1.0.1" />
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="9.0.0-preview.3.efcore.9.0.0" />
+    <PackageReference Include="Syncfusion.Blazor.WordProcessor" Version="29.2.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IO.Swagger\IO.Swagger.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Ignore\" />
+    <Folder Include="Migrations\" />
+  </ItemGroup>
+
+</Project>

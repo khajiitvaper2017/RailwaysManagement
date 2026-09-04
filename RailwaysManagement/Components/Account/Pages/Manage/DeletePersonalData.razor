@@ -1,0 +1,86 @@
+﻿@page "/Account/Manage/DeletePersonalData"
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using RailwaysManagement.DbModels
+
+@inject UserManager<RailwaysManagementUser> UserManager
+@inject SignInManager<RailwaysManagementUser> SignInManager
+@inject IdentityUserAccessor UserAccessor
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<DeletePersonalData> Logger
+
+<PageTitle>Видалення персональних даних</PageTitle>
+
+<StatusMessage Message="@message" />
+
+<h3>Видалення персональних даних</h3>
+
+<div class="alert alert-warning" role="alert">
+    <p>
+        <strong>Видалення цих даних призведе до остаточного видалення вашого облікового запису, і це не можна буде відновити.</strong>
+    </p>
+</div>
+
+<div>
+    <EditForm Model="Input" FormName="delete-user" OnValidSubmit="OnValidSubmitAsync" method="post">
+        <DataAnnotationsValidator />
+        <ValidationSummary class="text-danger" role="alert" />
+        @if (requirePassword)
+        {
+            <div class="form-floating mb-3">
+                <InputText type="password" @bind-Value="Input.Password" class="form-control" autocomplete="current-password" aria-required="true" placeholder="Введіть ваш пароль." />
+                <label for="password" class="form-label">Пароль</label>
+                <ValidationMessage For="() => Input.Password" class="text-danger" />
+            </div>
+        }
+        <button class="w-100 btn btn-lg btn-danger" type="submit">Видалити дані та закрити мій обліковий запис</button>
+    </EditForm>
+</div>
+
+@code {
+    private string? message;
+    private RailwaysManagementUser user = default!;
+    private bool requirePassword;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        user = await UserAccessor.GetRequiredUserAsync(HttpContext);
+        requirePassword = await UserManager.HasPasswordAsync(user);
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        if (requirePassword && !await UserManager.CheckPasswordAsync(user, Input.Password))
+        {
+            message = "Помилка: невірний пароль.";
+            return;
+        }
+
+        var result = await UserManager.DeleteAsync(user);
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException("Виникла неочікувана помилка під час видалення користувача.");
+        }
+
+        await SignInManager.SignOutAsync();
+
+        var userId = await UserManager.GetUserIdAsync(user);
+        Logger.LogInformation("Користувач з ID '{UserId}' видалив свій обліковий запис.", userId);
+
+        RedirectManager.RedirectToCurrentPage();
+    }
+
+    private sealed class InputModel
+    {
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+    }
+}

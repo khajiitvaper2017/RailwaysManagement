@@ -1,0 +1,391 @@
+﻿@page "/routerequests/create"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@using Microsoft.AspNetCore.Identity
+@using RailwaysManagement.Services
+@inject IJSRuntime JS
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+@inject OpenRailRoutingService OpenRailRoutingService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<RailwaysManagementUser> UserManager
+<PageTitle>Створити запит на маршрут</PageTitle>
+
+<h1>Створити запит на маршрут</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        <div id="routeRequestMap" style="height:60vh; margin-bottom:2vh"></div>
+        @if (ApproximateTime != new TimeOnly(0, 0, 0))
+        {
+            <div class="alert alert-info">
+                Приблизна відстань: @ApproximateDistance м<br />
+                Приблизний час: @ApproximateTime
+            </div>
+        }
+        <div class="d-flex justify-content-center mb-3">
+        </div>
+    </div>
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <h3>Деталі запиту на маршрут</h3>
+            </div>
+            <div class="card-body">
+                <EditForm Model="@RouteRequest" OnValidSubmit="HandleSubmit">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="mb-3">
+                        <label for="deadline" class="form-label">Термін доставки:</label>
+                        <InputDate min=@DateMin.ToString("yyyy-MM-dd")
+                        id="deadline" @bind-Value="RouteRequest.DeliveryDeadlineDate" class="form-control" required />
+                        <ValidationMessage For="() => RouteRequest.DeliveryDeadlineDate" class="text-danger" />
+                    </div>
+
+					<div class="mb-3">
+                        <label for="ShipmentDate">Дата відвантаження</label>
+                        <InputDate min=@ShipmentMinDate.ToString("yyyy-MM-dd")
+                                   id="ShipmentDate" @bind-Value="RouteRequest.ShipmentDate" class="form-control" required />
+						<ValidationMessage For="() => RouteRequest.ShipmentDate" class="text-danger" />
+                    </div>
+
+                    @if (_currentUser.Role == UserRole.Admin || _currentUser.Role == UserRole.Dispatcher)
+                    {
+                        <div class="mb-3">
+                            <label for="fromClient" class="form-label">Відправник (клієнт):</label>
+                            <InputSelect id="fromClient" @bind-Value="RouteRequest.SenderClientId" class="form-control" required @bind-Value:after="OnSenderClientChanged">
+                                <option value="">Оберіть клієнта</option>
+                                @foreach (var client in Clients.Where(c => c.Role == UserRole.Client))
+                                {
+                                    <option value="@client.Id">@client.Name - @client.Email</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="() => RouteRequest.SenderClientId" class="text-danger" />
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label for="toClient" class="form-label">Одержувач (клієнт):</label>
+                        <InputSelect id="toClient" @bind-Value="RouteRequest.ReceiverClientId" class="form-control" required @bind-Value:after="OnReceiverClientChanged">
+                            <option value="">Оберіть клієнта</option>
+
+                            @foreach (var client in Clients.Where(c => c.Role == UserRole.Client && c.Id != RouteRequest.SenderClientId)) // Exclude current user and sender
+                            {
+                                <option value="@client.Id">@client.Name - @client.Email</option>
+                            }
+                        </InputSelect>
+                        <ValidationMessage For="() => RouteRequest.ReceiverClientId" class="text-danger" />
+                    </div>
+
+                    <hr />
+                    <div class="mb-3">
+                        <h4>Вантажі</h4>
+                        @if (Cargos.Count > 0)
+                        {
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Назва</th>
+                                        <th>Кількість вагонів</th>
+                                        <th>Дії</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var cargo in Cargos)
+                                    {
+                                        <tr>
+                                            <td>@cargo.Name</td>
+                                            <td>@cargo.WagonsCount</td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-danger" @onclick="() => RemoveCargo(cargo)">
+                                                    Видалити
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="ShowAddCargoForm">
+                            Додати вантаж
+                        </button>
+                    </div>
+
+                    <div class="d-flex justify-content-between mt-4">
+                        <button type="submit" class="btn btn-primary" disabled="@(!IsFormValid)">Створити запит</button>
+                        <a href="/routerequests" class="btn btn-secondary">Скасувати</a>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (isAddingCargo)
+{
+    <div class="modal d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Додати новий вантаж</h5>
+                    <button type="button" class="btn-close" @onclick="HideAddCargoForm"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="@NewCargo" OnValidSubmit="AddCargo">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="mb-3">
+                            <label for="cargoName" class="form-label">Назва вантажу:</label>
+                            <InputText id="cargoName" @bind-Value="NewCargo.Name" class="form-control" required />
+                            <ValidationMessage For="() => NewCargo.Name" class="text-danger" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="cargoWagonsCount" class="form-label">Кількість вагонів:</label>
+                            <InputNumber id="cargoWagonsCount" @bind-Value="NewCargo.WagonsCount" class="form-control" required />
+                            <ValidationMessage For="() => NewCargo.WagonsCount" class="text-danger" />
+                        </div>
+
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" @onclick="HideAddCargoForm">Скасувати</button>
+                            <button type="submit" class="btn btn-primary">Додати вантаж</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<div>
+    <a href="/routerequests">Повернутися до списку</a>
+</div>
+
+@code {
+    private RouteRequest RouteRequest { get; set; } = new();
+    private List<Station> Stations { get; set; } = new();
+    private List<Cargo> Cargos { get; set; } = new();
+    private List<RailwaysManagementUser> Clients { get; set; } = new();
+    private Cargo NewCargo { get; set; } = new();
+    private RailwaysDbContext _dbContext = default!;
+    private bool isAddingCargo = false;
+
+	private DateTime ShipmentMinDate => DateTime.UtcNow.AddDays(1);
+    private DateTime DateMin => DateTime.UtcNow.AddDays(3);
+    private TimeOnly ApproximateTime { get; set; } = new TimeOnly(0, 0, 0);
+    private double ApproximateDistance { get; set; }
+
+    private bool CanShowRoute => !string.IsNullOrWhiteSpace(RouteRequest.ReceiverClientId) && !string.IsNullOrWhiteSpace(RouteRequest.SenderClientId);
+
+    private bool IsFormValid =>
+        !string.IsNullOrWhiteSpace(RouteRequest.SenderClientId) &&
+        !string.IsNullOrWhiteSpace(RouteRequest.ReceiverClientId) &&
+        RouteRequest.DeliveryDeadlineDate != default &&
+        RouteRequest.ShipmentDate != default &&
+        Cargos.Any();
+
+    private RailwaysManagementUser _currentUser = default!;
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _currentUser = await UserManager.GetUserAsync(user);
+
+        _dbContext = await DbFactory.CreateDbContextAsync();
+        Stations = await _dbContext.Stations.ToListAsync();
+        Clients = await _dbContext.RailwaysManagementUsers.ToListAsync(); 
+
+        RouteRequest.DeliveryDeadlineDate = DateTime.UtcNow.AddDays(4);
+		RouteRequest.ShipmentDate = DateTime.UtcNow.AddDays(1);
+        RouteRequest.IsCompleted = false;
+        if (_currentUser.Role == UserRole.Client)
+        {
+            RouteRequest.SenderClientId = _currentUser.Id;
+        }
+    }
+
+    private async Task ShowApproximateRoute()
+    {
+        if (!CanShowRoute)
+           return;
+
+        try
+        {
+            var sender = Clients.FirstOrDefault(c => c.Id == RouteRequest.SenderClientId);
+            if (sender?.Location == null) return;
+
+            var receiver = Clients.FirstOrDefault(c => c.Id == RouteRequest.ReceiverClientId);
+            if (receiver?.Location == null) return;
+            
+            var senderStation = sender.AssignedStation;
+            if (senderStation == null)
+                return;
+
+            var openRailRoutingResult = await OpenRailRoutingService.FindRouteAsync(sender.Location, senderStation.Location, receiver.Location);
+
+            ApproximateDistance = openRailRoutingResult.Distance;
+
+            ApproximateTime = TimeOnly.FromTimeSpan(TimeSpan.FromHours(ApproximateDistance / 1000 / 40)); // Assuming average speed of 40 km/h
+
+            await JS.InvokeVoidAsync("mapInterop.displayRoute", "routeRequestMap", openRailRoutingResult.Coordinates);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Помилка при відображенні маршруту: {ex.Message}");
+        }
+
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("mapInterop.initRouteRequestCreateMap", "routeRequestMap", Stations,
+                DotNetObjectReference.Create(this));
+
+            // Display sender and receiver client locations on map after map is initialized
+            await UpdateClientLocationMarkers();
+        }
+    }
+
+    // Helper to update both sender and receiver client markers
+    private async Task UpdateClientLocationMarkers()
+    {
+        // Sender
+        var sender = Clients.FirstOrDefault(c => c.Id == RouteRequest.SenderClientId);
+        if (sender?.Location != null)
+        {
+            await JS.InvokeVoidAsync("mapInterop.setClientLocationMarker", "routeRequestMap", "sender", sender.Location);
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("mapInterop.setClientLocationMarker", "routeRequestMap", "sender", null);
+        }
+
+        // Receiver
+        var receiver = Clients.FirstOrDefault(c => c.Id == RouteRequest.ReceiverClientId);
+        if (receiver?.Location != null)
+        {
+            await JS.InvokeVoidAsync("mapInterop.setClientLocationMarker", "routeRequestMap", "receiver", receiver.Location);
+        }
+        else
+        {
+            // Remove receiver marker if not set
+            await JS.InvokeVoidAsync("mapInterop.setClientLocationMarker", "routeRequestMap", "receiver", null);
+        }
+    }
+    
+    private async Task OnSenderClientChanged()
+    {
+        await UpdateClientLocationMarkers();
+        // If sender is same as receiver, clear receiver
+        if (RouteRequest.SenderClientId == RouteRequest.ReceiverClientId)
+        {
+            RouteRequest.ReceiverClientId = "";
+        }
+        StateHasChanged();
+    }
+
+    // Call this when receiver client changes
+    private async Task OnReceiverClientChanged()
+    {
+        await UpdateClientLocationMarkers();
+        StateHasChanged();
+    }
+
+    private async Task OnSenderStationChanged(ChangeEventArgs e)
+    {
+        var stationId = e.Value?.ToString() ?? string.Empty;
+        if (!string.IsNullOrEmpty(stationId))
+        {
+            var station = Stations.FirstOrDefault(s => s.Id == stationId);
+            if (station != null)
+            {
+                await JS.InvokeVoidAsync("mapInterop.zoomTo", "routeRequestMap",
+                    station.Location.Latitude, station.Location.Longitude);
+            }
+        }
+    }
+
+    private async Task OnReceiverStationChanged(ChangeEventArgs e)
+    {
+        var stationId = e.Value?.ToString() ?? string.Empty;
+        if (!string.IsNullOrEmpty(stationId))
+        {
+            var station = Stations.FirstOrDefault(s => s.Id == stationId);
+            if (station != null)
+            {
+                await JS.InvokeVoidAsync("mapInterop.zoomTo", "routeRequestMap",
+                    station.Location.Latitude, station.Location.Longitude);
+            }
+        }
+    }
+
+    private void ShowAddCargoForm()
+    {
+        NewCargo = new Cargo
+        {
+            Id = Guid.NewGuid().ToString(),
+        };
+        isAddingCargo = true;
+    }
+
+    private void HideAddCargoForm()
+    {
+        isAddingCargo = false;
+    }
+
+    private void AddCargo()
+    {
+        var cargo = new Cargo
+        {
+            Id = NewCargo.Id,
+            Name = NewCargo.Name,
+            WagonsCount = NewCargo.WagonsCount,
+        };
+
+        Cargos.Add(cargo);
+        HideAddCargoForm();
+    }
+
+    private void RemoveCargo(Cargo cargo)
+    {
+        Cargos.Remove(cargo);
+    }
+
+    private async Task HandleSubmit()
+    {
+        using var context = DbFactory.CreateDbContext();
+
+        var newRouteRequest = new RouteRequest
+			{
+				DeliveryDeadlineDate = RouteRequest.DeliveryDeadlineDate,
+				ShipmentDate = RouteRequest.ShipmentDate,
+				ReceiverClientId = RouteRequest.ReceiverClientId,
+				SenderClientId = RouteRequest.SenderClientId,
+				IsCompleted = false
+			};
+
+        foreach (var cargo in Cargos)
+        {
+			newRouteRequest.Cargos.Add(new Cargo
+				{
+					Name = cargo.Name,
+					WagonsCount = cargo.WagonsCount
+				});
+        }
+
+        context.RouteRequests.Add(newRouteRequest);
+        await context.SaveChangesAsync();
+
+        NavigationManager.NavigateTo("/routerequests");
+    }
+
+    public void Dispose()
+    {
+        _dbContext?.Dispose();
+    }
+}

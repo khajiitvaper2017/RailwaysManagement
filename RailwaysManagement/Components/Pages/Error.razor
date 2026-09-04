@@ -1,0 +1,32 @@
+﻿@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Помилка</PageTitle>
+
+<h1 class="text-danger">Помилка.</h1>
+<h2 class="text-danger">Виникла помилка під час обробки вашого запиту.</h2>
+
+@if (ShowRequestId)
+{
+    <p>
+        <strong>ID запиту:</strong> <code>@RequestId</code>
+    </p>
+}
+
+<p>
+    Якщо ця помилка виникає постійно, зверніться до адміністратора системи або служби підтримки.
+</p>
+<p>
+    Для отримання додаткової інформації перевірте журнал подій або зверніться до технічної підтримки.
+</p>
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

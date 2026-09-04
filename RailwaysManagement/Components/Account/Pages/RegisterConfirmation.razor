@@ -1,0 +1,68 @@
+﻿@page "/Account/RegisterConfirmation"
+
+@using System.Text
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using RailwaysManagement.DbModels
+
+@inject UserManager<RailwaysManagementUser> UserManager
+@inject IEmailSender<RailwaysManagementUser> EmailSender
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Підтвердження реєстрації</PageTitle>
+
+<h1>Підтвердження реєстрації</h1>
+
+<StatusMessage Message="@statusMessage" />
+
+@if (emailConfirmationLink is not null)
+{
+    <p>
+        У цьому додатку наразі не налаштовано справжній відправник електронної пошти, дивіться <a href="https://aka.ms/aspaccountconf">ці документи</a> для налаштування справжнього відправника.
+        Зазвичай це посилання надсилається на пошту: <a href="@emailConfirmationLink">Натисніть тут, щоб підтвердити свій акаунт</a>
+    </p>
+}
+else
+{
+    <p>Будь ласка, перевірте свою електронну пошту для підтвердження акаунта.</p>
+}
+
+@code {
+    private string? emailConfirmationLink;
+    private string? statusMessage;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? Email { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Email is null)
+        {
+            RedirectManager.RedirectTo("");
+        }
+
+        var user = await UserManager.FindByEmailAsync(Email);
+        if (user is null)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            statusMessage = "Помилка пошуку користувача за невказаною електронною поштою";
+        }
+        else if (EmailSender is IdentityNoOpEmailSender)
+        {
+            // Remove this code after configuring a real email sender.
+            var userId = await UserManager.GetUserIdAsync(user);
+            var code = await UserManager.GenerateEmailConfirmationTokenAsync(user);
+            code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+            emailConfirmationLink = NavigationManager.GetUriWithQueryParameters(
+                NavigationManager.ToAbsoluteUri("Account/ConfirmEmail").AbsoluteUri,
+                new Dictionary<string, object?> { ["userId"] = userId, ["code"] = code, ["returnUrl"] = ReturnUrl });
+        }
+    }
+}

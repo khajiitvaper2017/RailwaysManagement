@@ -1,0 +1,61 @@
+﻿@page "/cargos/delete"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Видалити вантаж</PageTitle>
+
+<h1>Видалити вантаж</h1>
+
+<p>Ви впевнені, що хочете видалити цей вантаж?</p>
+<div>
+    <h2>Деталі вантажу</h2>
+    <hr />
+    <CargoDetails Cargo="cargo" />
+    @if (cargo is not null)
+    {
+        <EditForm method="post" Model="cargo" OnValidSubmit="DeleteCargo" FormName="delete" Enhance>
+            <button type="submit" class="btn btn-danger" disabled="@(cargo is null)">Видалити</button> |
+            <a href="/cargos">Повернутися до списку</a>
+        </EditForm>
+    }
+</div>
+
+@code {
+    private Cargo? cargo;
+
+    [SupplyParameterFromQuery]
+    private string? Id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+
+        using var context = DbFactory.CreateDbContext();
+        cargo = await context.Cargos
+            .Include(c => c.RouteRequest)
+            .FirstOrDefaultAsync(m => m.Id == Id);
+
+        if (cargo is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+        }
+    }
+
+    private async Task DeleteCargo()
+    {
+        using var context = DbFactory.CreateDbContext();
+        var entity = await context.Cargos.FirstOrDefaultAsync(c => c.Id == cargo!.Id);
+        if (entity is not null)
+        {
+            context.Cargos.Remove(entity);
+            await context.SaveChangesAsync();
+        }
+        NavigationManager.NavigateTo("/cargos");
+    }
+}

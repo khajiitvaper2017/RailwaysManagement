@@ -1,0 +1,54 @@
+﻿@page "/routerequests/delete"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Delete</PageTitle>
+
+<h1>Delete</h1>
+
+<p>Are you sure you want to delete this?</p>
+<div>
+    <h2>Деталі заявки на маршрут</h2>
+    <hr />
+    <RouteRequestDetails RouteRequest="routerequest" />
+    @if (routerequest is not null)
+    {
+        <EditForm method="post" Model="routerequest" OnValidSubmit="DeleteRouteRequest" FormName="delete" Enhance>
+            <button type="submit" class="btn btn-danger" disabled="@(routerequest is null)">Видалити</button> |
+            <a href="/routerequests">Повернутися до списку</a>
+        </EditForm>
+    }
+</div>
+
+@code {
+    private RouteRequest? routerequest;
+
+    [SupplyParameterFromQuery]
+    private string Id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var context = DbFactory.CreateDbContext();
+        routerequest = await context.RouteRequests
+			.Include(r => r.Cargos)
+            .Include(r => r.SenderClient)
+			.Include(r => r.ReceiverClient)
+            .FirstOrDefaultAsync(m => m.Id == Id);
+
+        if (routerequest is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+    }
+
+    private async Task DeleteRouteRequest()
+    {
+        using var context = DbFactory.CreateDbContext();
+        context.RouteRequests.Remove(routerequest!);
+        await context.SaveChangesAsync();
+        NavigationManager.NavigateTo("/routerequests");
+    }
+}

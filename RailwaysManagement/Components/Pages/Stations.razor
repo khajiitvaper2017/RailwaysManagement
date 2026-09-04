@@ -1,0 +1,435 @@
+﻿@page "/stations"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@using RailwaysManagement.Models
+@using Microsoft.AspNetCore.Authorization
+@using System.Globalization
+@using RailwaysManagement.Services
+@inject IJSRuntime JS
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject GeoJsonService GeoJsonService
+@inject NavigationManager NavigationManager
+@attribute [Authorize(Roles = "Admin,Dispatcher")]
+@rendermode InteractiveServer
+
+<h3 id="pageTitle">Станції</h3>
+
+<div class="d-flex @(_isFormVisible ? "flex-row" : "")">
+    <div class="col-md-6" hidden="@_isMapHidden" id="stationsMap" style="height:60vh; margin-bottom:2vh"></div>
+
+    @if (_isFormVisible)
+    {
+        <div class="col-md-5 pl-3" style="margin-left: 2vh">
+            <div class="card">
+                <div class="card-header">
+                    <h4>@(_currentStation == null ? "Додати нову станцію" : "Редагувати станцію")</h4>
+                </div>
+                <div class="card-body">
+                    <EditForm Model="@_stationForm" OnValidSubmit="HandleValidSubmit">
+                        <DataAnnotationsValidator/>
+                        <ValidationSummary/>
+
+                        <div class="form-group mb-3">
+                            <label for="stationName">Назва</label>
+                            <InputText id="stationName" class="form-control" @bind-Value="_stationForm.Name"/>
+                        </div>
+
+                        <div class="form-group mb-3">
+                            <label for="latitude">Широта</label>
+                            <InputNumber id="latitude" class="form-control" @bind-Value="_stationForm.Latitude"/>
+                        </div>
+
+                        <div class="form-group mb-3">
+                            <label for="longitude">Довгота</label>
+                            <InputNumber id="longitude" class="form-control" @bind-Value="_stationForm.Longitude"/>
+                        </div>
+
+                        <div class="form-group mb-3">
+                            <label for="maxCars">Максимальна кількість вагонів</label>
+                            <InputNumber id="maxCars" class="form-control" @bind-Value="_stationForm.MaxCars"/>
+                        </div>
+
+
+                        <div class="d-flex justify-content-between">
+                            <button type="submit" class="btn btn-primary">Зберегти</button>
+                            <button type="button" class="btn btn-secondary" @onclick="CancelForm">Скасувати</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<button class="btn btn-primary mb-2 me-2" id="btnAddNewStation" disabled="@(!_canAddStation)"
+@onclick="AddNewStationBtn">
+    @(_canAddStation ? "Додати нову станцію" : "Клікніть правою кнопкою миші на мапі, щоб додати станцію")
+</button>
+<button class="btn btn-danger mb-2" id="btnHideShowMap"
+@onclick="HideShowMap">
+    @if (!_isMapHidden)
+    {
+        <span>Сховати мапу</span>
+    }
+    else
+    {
+        <span>Показати мапу</span>
+    }
+</button>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Назва</th>
+            <th>Широта</th>
+            <th>Довгота</th>
+            <th>Макс. вагони</th>
+            <th>Кількість поїздів</th>
+            <th>Поїзди</th>
+            <th>Дії</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var station in _stations)
+        {
+            <tr id="trStation_@station.Id"
+            style="@(SelectedStation?.Id == station.Id ? "font-weight: bold;" : "")">
+                <td>@station.Name</td>
+                <td>@station.Location.Latitude.ToString("F3", CultureInfo.InvariantCulture)</td>
+                <td>@station.Location.Longitude.ToString("F3", CultureInfo.InvariantCulture)</td>
+                <td>@station.MaxCars</td>
+                <td>@station.Trains.Count</td>
+            <td>
+                @if (station.Trains.Any())
+                {
+                    if (!_expandedStations.ContainsKey(station.Id) || !_expandedStations[station.Id])
+                    {
+                        <button class="btn btn-sm btn-link" @onclick="() => ToggleTrainsVisibility(station.Id)">Показати</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-link" @onclick="() => ToggleTrainsVisibility(station.Id)">Приховати</button>
+                        <ul class="mb-0 ps-3">
+                            @foreach (var train in station.Trains)
+                            {
+                                <li>@train.Name</li>
+                            }
+                        </ul>
+                    }
+                }
+                else
+                {
+                    <span>Немає поїздів</span>
+                }
+            </td>
+            <td>
+                    <button class="btn btn-sm btn-info" @onclick="() => Zoom(station)">Показати на карті</button>
+                <button class="btn btn-sm btn-primary" @onclick="() => EditStationBtn(station)">Редагувати</button>
+                <button class="btn btn-sm btn-danger" @onclick="() => DeleteStation(station)">Видалити</button>
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+@code {
+    private RailwaysDbContext context = default!;
+    private bool _canAddStation;
+    private bool _isMapHidden;
+    private bool _isFormVisible;
+    private Station _currentStation;
+
+    // Station form model
+    private StationFormModel _stationForm = new();
+
+    private List<Station> _stations = new();
+
+    // Holds expanded/collapsed stations
+    private Dictionary<string, bool> _expandedStations = new();
+
+    private class StationFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+        public int MaxCars { get; set; }
+    }
+
+    private void HideShowMap()
+    {
+        _isMapHidden = !_isMapHidden;
+        StateHasChanged();
+    }
+
+    private Station _selectedStation;
+
+    public Station SelectedStation
+    {
+        get => _selectedStation;
+        set
+        {
+            _selectedStation = value;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Loads all stations from the DbContext, including Trains and Cargos.
+    /// </summary>
+    private void UpdateStations()
+    {
+        _stations = context.Stations
+            .Include(s => s.Trains)
+            .Include(s => s.Cargos)
+            .Include(s=>s.IncomingConnections)
+			.Include(s => s.OutgoingConnections)
+			.AsSplitQuery()
+            .ToList();
+    }
+
+    protected override void OnInitialized()
+    {
+        context = DbFactory.CreateDbContext();
+        SeedData();
+        UpdateStations();
+    }
+
+    public void SeedData()
+    {
+        if (context.Stations.Any())
+        {
+            Console.WriteLine("Stations already seeded.");
+            return;
+        }
+        Console.WriteLine("Seeding stations...");
+
+        var stations = context.Stations.ToList();
+        foreach (var station in GeoJsonService.Stations)
+        {
+            var newStation = new Station()
+            {
+                Id = station.Id,
+                Location = station.Location,
+                Name = station.Name,
+                YardsNumber = station.YardsNumber,
+                MaxCars = station.MaxCars
+            };
+            stations.Add(newStation);
+
+            for (int i = 0; i < station.YardsNumber / 2; i++)
+            {
+                var train = new Train
+                {
+                    Name = $"Локомотив {station.Name} {i}",
+                    MaxCarsCount = 40 + Random.Shared.Next(20),
+                    Station = newStation,
+                    StationId = newStation.Id
+                };
+                newStation.Trains.Add(train);
+            }
+        }
+        context.Stations.AddRange(stations);
+        context.SaveChanges();
+        UpdateStations();
+
+        UpdateMap();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await UpdateMap();
+        }
+    }
+
+    private async Task UpdateMap()
+    {
+        // Initialize the map with the current stations without cargo and train info
+        var stations = context.Stations.
+            Select(s => new
+            {
+                s.Id,
+                s.Name,
+                Location = new
+                {
+                    s.Location.Latitude,
+                    s.Location.Longitude
+                },
+                MaxCars = s.MaxCars,
+                YardsNumber = s.YardsNumber
+            }).ToList();
+        await JS.InvokeVoidAsync("mapInterop.initStationsMap", "stationsMap", stations,
+            DotNetObjectReference.Create(this));
+    }
+
+    [JSInvokable]
+    public async Task StationSelected(double latitude, double longitude)
+    {
+        Console.WriteLine($"Station selected: Lat={latitude}, Lng={longitude}");
+        SelectedStation = context.Stations
+            .FirstOrDefault(s => s.Location.Latitude == latitude && s.Location.Longitude == longitude);
+
+        if (SelectedStation != null)
+        {
+            Console.WriteLine($"Selected station: {SelectedStation.Name}");
+            await ScrollToElementId("trStation_" + SelectedStation.Id);
+        }
+        else
+        {
+            Console.WriteLine("No station found at the selected location.");
+        }
+
+        await Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public async Task AddNewStationCS(double latitude, double longitude)
+    {
+        _canAddStation = true;
+        _stationForm.Latitude = latitude;
+        _stationForm.Longitude = longitude;
+        _currentStation = null;
+        StateHasChanged();
+    }
+
+    private async Task AddNewStationBtn()
+    {
+        _currentStation = null;
+        _stationForm = new StationFormModel();
+        _isFormVisible = true;
+
+        StateHasChanged();
+    }
+
+    private async Task EditStationBtn(Station station)
+    {
+        await JS.InvokeVoidAsync("scrollToTop");
+        _currentStation = station;
+        _stationForm = new StationFormModel
+        {
+            Name = station.Name,
+            Latitude = station.Location.Latitude,
+            Longitude = station.Location.Longitude,
+            MaxCars = station.MaxCars
+        };
+        _isFormVisible = true;
+        StateHasChanged();
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        if (_currentStation == null)
+        {
+            var id = Guid.NewGuid().ToString();
+            var newStation = new Station
+            {
+                Id = id,
+                Name = _stationForm.Name,
+                MaxCars = _stationForm.MaxCars,
+                Location = new Location(_stationForm.Latitude, _stationForm.Longitude, id)
+            };
+
+            context.Stations.Add(newStation);
+        }
+        else
+        {
+            _currentStation.Name = _stationForm.Name;
+            _currentStation.Location.Latitude = _stationForm.Latitude;
+            _currentStation.Location.Longitude = _stationForm.Longitude;
+            _currentStation.MaxCars = _stationForm.MaxCars;
+            context.Stations.Update(_currentStation);
+        }
+
+        await context.SaveChangesAsync();
+        await UpdateStationsDistances();
+
+        _isFormVisible = false;
+        _currentStation = null;
+        UpdateStations();
+        await UpdateMap();
+
+        StateHasChanged();
+    }
+
+    private void CancelForm()
+    {
+        _isFormVisible = false;
+        _currentStation = null;
+        StateHasChanged();
+    }
+
+    private async Task DeleteStation(Station station)
+    {
+        var trains = context.Trains.Where(t => t.StationId == station.Id).ToList();
+        context.Trains.RemoveRange(trains);
+		context.StationConnections.RemoveRange(station.IncomingConnections);
+		context.StationConnections.RemoveRange(station.OutgoingConnections);
+        context.Stations.Remove(station);
+        await context.SaveChangesAsync();
+
+        UpdateStations();
+        await UpdateMap();
+        StateHasChanged();
+    }
+
+    private async Task Zoom(Station station)
+    {
+        if (_isMapHidden)
+            HideShowMap();
+        await JS.InvokeVoidAsync("scrollToTop");
+
+        await JS.InvokeVoidAsync("mapInterop.zoomTo", "stationsMap", station.Location.Latitude, station.Location.Longitude);
+        await Task.CompletedTask;
+    }
+
+    private async Task ScrollToElementId(string elementId)
+    {
+        await JS.InvokeVoidAsync("scrollToElementId", elementId);
+    }
+
+    private async Task ScrollToTop()
+    {
+        await JS.InvokeVoidAsync("scrollToTop");
+    }
+
+    private void ToggleTrainsVisibility(string stationId)
+    {
+        if (!_expandedStations.ContainsKey(stationId))
+        {
+            _expandedStations[stationId] = true;
+        }
+        else
+        {
+            _expandedStations[stationId] = !_expandedStations[stationId];
+        }
+    }
+
+    private async Task UpdateStationsDistances()
+    {
+		await context.UpdateStationConnectionsDistances();
+    }
+
+    private async Task AssignClosestStations()
+    {
+		await context.AssignClosestStationsToUsers();
+    }
+
+}
+
+<script>
+    window.scrollToElementId = (elementId) => {
+        console.info('scrolling to element', elementId);
+        var element = document.getElementById(elementId);
+        if (!element) {
+            console.warn('element was not found', elementId);
+            return false;
+        }
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return true;
+    };
+
+    function scrollToTop() {
+        document.documentElement.scrollTop = 0;
+    }
+</script>

@@ -1,0 +1,152 @@
+﻿@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+@page "/client/location/select"
+@using RailwaysManagement.DbModels
+@using RailwaysManagement.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject RoleManager<IdentityRole> RoleManager
+@inject UserManager<RailwaysManagementUser> UserManager
+@inject AuthenticationStateProvider GetAuthenticationStateAsync
+@inject IDbContextFactory<RailwaysDbContext> DbContextFactory
+<h3>Виберіть точку відгрузки: </h3>
+
+<AuthorizeView Roles="Client">
+	<Authorized>
+		<p>Виберіть точку на карті, яка буде використовуватися як точка відгрузки для вантажів. Наші вантажні потяги заберуть ваш вантаж з найближчої станції.</p>
+		<div id="client-location-map" style="height:400px;"></div>
+		@if (user?.Location != null)
+		{
+			<p>Широта: @user.Location.Latitude, Довгота: @user.Location.Longitude</p>
+		}
+		else
+		{
+			<p>Точка не вибрана.</p>
+		}
+
+		@if (_selectedStation != null)
+		{
+			<p class="text-success"><strong>Вибрана станція: @_selectedStation.Name</strong></p>
+		}
+		else
+		{
+			<p class="text-warning">Станція не вибрана. Натисніть на станцію на карті, щоб вибрати її.</p>
+		}
+
+		<p>Після вибору точки та станції, натисніть кнопку "Зберегти", щоб зберегти їх.</p>
+		<button class="btn btn-primary" @onclick="Save">Зберегти</button>
+	</Authorized>
+	<NotAuthorized>
+		<p>Тільки авторизовані клієнти можуть вибирати або змінювати точку відгрузки.</p>
+	</NotAuthorized>
+</AuthorizeView>
+
+@code {
+	private RailwaysManagementUser? user;
+	private RailwaysDbContext dbContext;
+	private Station? _selectedStation;
+
+	protected override void OnInitialized()
+	{
+		dbContext = DbContextFactory.CreateDbContext();
+		user = UserManager.GetUserAsync(GetAuthenticationStateAsync.GetAuthenticationStateAsync().Result.User).Result;
+		
+		// Load the user's assigned station if it exists
+		if (user?.AssignedStationId != null)
+		{
+			_selectedStation = dbContext.Stations.FirstOrDefault(s => s.Id == user.AssignedStationId);
+		}
+		
+		base.OnInitialized();
+	}
+
+	protected override async Task OnAfterRenderAsync(bool firstRender)
+	{
+		if (firstRender)
+		{ 
+			// Get all stations with additional information for display
+			var stations = dbContext.Stations
+				.AsEnumerable()
+				.Where(s => s.Location != null && s.Location.Latitude != 0d && s.Location.Longitude != 0d)
+				.Select(s => new { 
+					s.Id, 
+					s.Name, 
+					s.Location.Latitude, 
+					s.Location.Longitude 
+				})
+				.ToList();
+				
+			// Initialize the map with stations, helper reference, user's location, and assigned station ID
+			await JS.InvokeVoidAsync(
+				"mapInterop.initClientLocationMap", 
+				"client-location-map", 
+				stations, 
+				DotNetObjectReference.Create(this), 
+				user?.Location,
+				_selectedStation?.Id // Pass the currently assigned station ID
+			);
+		}
+	}
+
+	[JSInvokable]
+	public void ClientLocationSelected(double latitude, double longitude)
+	{
+		if (user == null)
+		{
+			return; // User is not authenticated
+		}
+
+		// Update user's location
+		if (user.Location == null)
+		{
+			user.Location = new Location
+			{
+				Latitude = latitude,
+				Longitude = longitude
+			};
+		}
+		else
+		{
+			user.Location.Latitude = latitude;
+			user.Location.Longitude = longitude;
+		 }
+		// Update the UI
+		StateHasChanged();
+	}
+	
+	[JSInvokable]
+	public void StationSelected(string stationId)
+	{
+		if (user == null)
+		{
+			return; // User is not authenticated
+		}
+
+		// Find the station by ID
+		_selectedStation = dbContext.Stations
+			.FirstOrDefault(s => s.Id == stationId);
+
+		// Update the UI
+		StateHasChanged();
+	}
+
+	private void Save()
+	{
+		if (user?.Location == null)
+		{
+			JS.InvokeVoidAsync("alert", "Будь ласка, виберіть точку на карті перед збереженням.");
+			return;
+		}
+		
+		if (_selectedStation == null)
+		{
+			JS.InvokeVoidAsync("alert", "Будь ласка, виберіть станцію на карті перед збереженням.");
+			return;
+		}
+
+		// Save the user's location and selected station to the database
+		user.AssignedStationId = _selectedStation.Id;
+		UserManager.UpdateAsync(user).Wait();
+		NavigationManager.NavigateTo("/");
+	}
+}

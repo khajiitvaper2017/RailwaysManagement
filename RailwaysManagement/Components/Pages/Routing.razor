@@ -1,0 +1,1060 @@
+﻿@page "/routing"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@using RailwaysManagement.Models
+@using RailwaysManagement.Models.Actions
+@using RailwaysManagement.Services
+@using ClosedXML.Report
+@using Microsoft.AspNetCore.Authorization
+@using Syncfusion.DocIO
+@using Syncfusion.DocIO.DLS
+
+@inject IJSRuntime JS
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject OpenRailRoutingService OpenRailRoutingService
+@inject RoutingService RoutingService
+@inject RouteReportGenerationService RouteReportGenerationService
+@inject NavigationManager NavigationManager
+
+@attribute [Authorize(Roles = "Admin,Dispatcher")]
+@rendermode InteractiveServer
+
+<h3>Маршрутизація</h3>
+
+<AuthorizeView Roles="Admin, Dispatcher">
+<div class="container-fluid">
+<div class="row mb-4">
+	<div class="col-md-12">
+		<div class="btn-group">
+			<button class="btn btn-primary" @onclick="ProcessRouteRequests">
+				<i class="fas fa-route"></i> Обробити запити на маршрутизацію
+			</button>
+			<button class="btn btn-danger" @onclick="ClearRoutes">
+				<i class="fas fa-trash"></i> Очистити маршрути
+			</button>
+
+			@if (SelectedRoute != null)
+			{
+				<button class="btn btn-success" @onclick="GenerateRouteReport">
+					<i class="fas fa-file-excel"></i> Створити звіт
+				</button>
+			}
+		</div>
+		@if (!string.IsNullOrEmpty(ProcessingMessage))
+		{
+			<div class="alert alert-info mt-2">@ProcessingMessage</div>
+		}
+	</div>
+</div>
+
+<!-- Table Section (Full Width) -->
+<div class="row mb-3">
+	<div class="col-12">
+		<div class="card">
+			<div class="card-header">
+				<h5>Маршрути (@Routes.Count)</h5>
+			</div>
+			<div class="card-body routes-list">
+				@if (Routes.Any())
+				{
+					<div class="table-responsive">
+						<table class="table table-hover">
+							<thead>
+							<tr>
+								<th>Назва</th>
+								<th>Поїзд</th>
+								<th>Станції</th>
+								<th>Вагони</th>
+								<th>Відправник</th>
+								<th>Отримувач</th>
+							</tr>
+							</thead>
+							<tbody>
+							@foreach (var route in Routes)
+							{
+								var isSelected = SelectedRoute?.Id == route.Id;
+								<tr class="@(isSelected ? "table-primary" : "")"
+								    @onclick="() => SelectRoute(route)" style="cursor: pointer;">
+									<td>@(string.IsNullOrEmpty(route.Name) ? $"Маршрут #{Routes.IndexOf(route) + 1}" : route.Name)</td>
+									<td>
+										@if (RouteTrains.TryGetValue(route.Id, out var trains) && trains.Any())
+										{
+											var train = trains.FirstOrDefault();
+											if (train != null)
+											{
+												<span title="@train.Name">@train.Name</span>
+											}
+											else
+											{
+												<span class="text-muted route-line">Поїзд не назначений</span>
+											}
+										}
+									</td>
+
+									<td>
+										@if (RouteStations.TryGetValue(route.Id, out var stations))
+										{
+											@stations.Count
+										}
+										else
+										{
+											<span>0</span>
+										}
+									</td>
+									<td>
+										@if (RouteCargos.TryGetValue(route.Id, out var cargos))
+										{
+											<span title="@string.Join(", ", cargos.Select(c => string.IsNullOrEmpty(c.Name) ? $"Вантаж #{c.Id.Substring(0, 4)}" : c.Name))">@cargos.Sum(car => car.WagonsCount)</span>
+										}
+										else
+										{
+											<span>0</span>
+										}
+									</td>
+									<td>
+										@if (RouteClients.TryGetValue(route.Id, out var clients1) && !string.IsNullOrEmpty(clients1.Item1))
+										{
+											@clients1.Item1
+										}
+										else
+										{
+											<span>-</span>
+										}
+									</td>
+									<td>
+										@if (RouteClients.TryGetValue(route.Id, out var clients2) && !string.IsNullOrEmpty(clients2.Item2))
+										{
+											@clients2.Item2
+										}
+										else
+										{
+											<span>-</span>
+										}
+									</td>
+								</tr>
+							}
+							</tbody>
+						</table>
+					</div>
+				}
+				else
+				{
+					<div class="alert alert-info">
+						Немає доступних маршрутів. Натисніть кнопку "Обробити запити на маршрутизацію" для створення маршрутів.
+					</div>
+				}
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Map Section -->
+<div class="row mb-3">
+	<div class="col-12">
+		<div class="card">
+			<div class="card-header">
+				<h5>Карта маршруту</h5>
+			</div>
+			<div class="card-body">
+				<div id="routingMap" style="height: 400px; width: 100%;"></div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Details Section -->
+@if (SelectedRoute != null)
+{
+	<div class="row">
+		<div class="col-12">
+			<div class="card mb-3">
+				<div class="card-header">
+					<h5>Деталі маршруту</h5>
+				</div>
+				<div class="card-body">
+					<h6>Інформація про маршрут:</h6>
+					<div class="card mb-3">
+						<div class="card-body">
+							<p>
+								<strong>Назва:</strong> @(string.IsNullOrEmpty(SelectedRoute.Name) ? $"Маршрут #{Routes.IndexOf(SelectedRoute) + 1}" : SelectedRoute.Name)
+							</p>
+							<p>
+								<strong>Створено:</strong> @SelectedRoute.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+							</p>
+							<p>
+								<strong>Оновлено:</strong> @SelectedRoute.LastModifiedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+							</p>
+							@if (RouteStations.TryGetValue(SelectedRoute.Id, out var routeStations) && routeStations.Any())
+							{
+								<p><strong>Відстань:</strong> @GetRouteDistance(SelectedRoute) км</p>
+								<p>
+									<strong>Приблизний час виконання:</strong> @GetRouteDuration(SelectedRoute)
+								</p>
+							}
+							<p>
+								<strong>Приблизний час початку:</strong> @(SelectedRoute.RailRouteRouteParts.FirstOrDefault()?.RoutePart.PlannedRoute?.Actions.FirstOrDefault()?.Time.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "Невідомо")
+							</p>
+							<p>
+								<strong>Приблизний час завершення:</strong> @(SelectedRoute.RailRouteRouteParts.LastOrDefault()?.RoutePart.PlannedRoute?.Actions.LastOrDefault()?.Time.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "Невідомо")
+							</p>
+						</div>
+					</div>
+
+					<div class="row">
+						<div class="col-md-6">
+							<h6>Станції маршруту:</h6>
+							@if (RouteStations.TryGetValue(SelectedRoute.Id, out var selectedStations) && selectedStations.Any())
+							{
+								<ol class="list-group list-group-numbered">
+									@foreach (var station in selectedStations.OrderBy(s => s.Order))
+									{
+										var stationName = GetStationName(station.StationId);
+										<li class="list-group-item d-flex justify-content-between align-items-start">
+											<div class="ms-2 me-auto">
+												<div class="fw-bold">@stationName</div>
+												@if (station.ExpectedArrival.HasValue)
+												{
+													<div>
+														<small>Прибуття: @station.ExpectedArrival.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</small>
+													</div>
+												}
+												@if (station.ExpectedDeparture.HasValue)
+												{
+													<div>
+														<small>Відправлення: @station.ExpectedDeparture.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</small>
+													</div>
+												}
+											</div>
+										</li>
+									}
+								</ol>
+							}
+							else
+							{
+								<div class="alert alert-warning">Станції не знайдено</div>
+							}
+						</div>
+
+						<div class="col-md-6">
+							@if (RoutePlannedRoutes.TryGetValue(SelectedRoute.Id, out var plannedRoute) && plannedRoute is { Actions: not null } && plannedRoute.Actions.Any())
+							{
+								<div class="card mb-3">
+									<div class="card-header">
+										<h6 class="mb-0">Деталі запланованого маршруту</h6>
+									</div>
+									<div class="card-body">
+										@{
+											var allLocations = GetAllRouteLocations(plannedRoute);
+										}
+										@if (allLocations.Any())
+										{
+											<div class="route-timeline mb-3">
+												<div class="route-path">
+													@for (var i = 0; i < Math.Min(10, allLocations.Count); i++)
+													{
+														var isStation = IsLocationNearStation(allLocations[i]);
+														var percentage = i / (float)Math.Min(10, allLocations.Count - 1) * 100;
+														<div class="route-point @(isStation ? "station-point" : "")"
+														     style="left: @percentage%;"
+														     title="@(isStation ? "Станція" : "Точка маршруту")">
+														</div>
+													}
+													<div class="route-line"></div>
+												</div>
+											</div>
+
+											<h6>Дії маршруту:</h6>
+											<ul class="list-group">
+												@foreach (var action in plannedRoute.Actions)
+												{
+													<li class="list-group-item">
+														@action.Description
+													</li>
+												}
+											</ul>
+										}
+										else
+										{
+											<div class="alert alert-info">Детальна інформація про маршрут відсутня</div>
+										}
+									</div>
+								</div>
+							}
+						</div>
+					</div>
+
+					<div class="row mt-3">
+						<div class="col-md-6">
+							<h6>Потяги:</h6>
+							@if (RouteTrains.Any())
+							{
+								foreach (var selectedTrain in RouteTrains[SelectedRoute.Id])
+								{
+									<div class="card">
+										<div class="card-body">
+											<h5 class="card-title">@(string.IsNullOrEmpty(selectedTrain.Name) ? $"Потяг #{selectedTrain.Id.Substring(0, 4)}" : selectedTrain.Name)</h5>
+											<p class="card-text">
+												<strong>Максимальна кількість вагонів:</strong> @selectedTrain.MaxCarsCount
+											</p>
+											<p class="card-text">
+												<strong>Поточна станція:</strong> @GetStationName(selectedTrain.StationId)
+											</p>
+										</div>
+									</div>
+								}
+							}
+							else
+							{
+								<div class="alert alert-warning">Потяг не призначено</div>
+							}
+						</div>
+
+						<div class="col-md-6">
+							<h6>Порядок вагонів:</h6>
+							@if (RouteCargos.TryGetValue(SelectedRoute.Id, out var selectedCargos) && selectedCargos.Any())
+							{
+								<div class="table-responsive">
+									<table class="table table-sm">
+										<thead>
+										<tr>
+											<th>Назва</th>
+											<th>Статус</th>
+											<th>Створено</th>
+										</tr>
+										</thead>
+										<tbody>
+										@foreach (var cargo in selectedCargos)
+										{
+											for (var i = 0; i < cargo.WagonsCount; i++)
+											{
+												<tr>
+													<td>@(cargo.Name + $" {i + 1}")</td>
+													<td>@(GetCargoStatus(cargo))</td>
+													<td>@cargo.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy")</td>
+												</tr>
+											}
+										}
+										</tbody>
+									</table>
+								</div>
+							}
+							else
+							{
+								<div class="alert alert-warning">Вантажі не знайдено</div>
+							}
+						</div>
+					</div>
+
+					<div class="row mt-3">
+						<div class="col-12">
+							<h6>Клієнти:</h6>
+							@if (RouteClients.TryGetValue(SelectedRoute.Id, out var clients))
+							{
+								<div class="card">
+									<div class="card-body">
+										<div class="row">
+											<div class="col-md-6">
+												<p>
+													<strong>Відправник:</strong> @clients.Item1
+												</p>
+											</div>
+											<div class="col-md-6">
+												<p>
+													<strong>Отримувач:</strong> @clients.Item2
+												</p>
+											</div>
+										</div>
+									</div>
+								</div>
+							}
+							else
+							{
+								<div class="alert alert-warning">Інформація про клієнтів відсутня</div>
+							}
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+</div>
+</AuthorizeView>
+
+<style>
+	.route-timeline {
+		padding: 10px 0;
+	}
+
+	.route-path {
+		position: relative;
+		height: 30px;
+		margin: 0 10px;
+	}
+
+	.route-line {
+		position: absolute;
+		top: 14px;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background-color: #007bff;
+	}
+
+	.route-point {
+		position: absolute;
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background-color: #007bff;
+		top: 10px;
+		transform: translateX(-50%);
+		z-index: 1;
+	}
+
+	.station-point {
+		width: 14px;
+		height: 14px;
+		top: 8px;
+		background-color: #28a745;
+	}
+</style>
+
+<script>
+	function downloadFile(filename, contentType, data) {
+		const blob = new Blob([data], { type: contentType });
+		const url = window.URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		setTimeout(() => {
+				document.body.removeChild(a);
+				window.URL.revokeObjectURL(url);
+			},
+			100);
+	}
+
+// Make the function available globally
+	window.downloadFile = downloadFile;
+</script>
+
+@code {
+	private List<RailRoute> Routes = new();
+	private List<Station> _allStations = new();
+	private RailRoute? SelectedRoute;
+	private string? ProcessingMessage;
+
+	// Cache collections for performance
+	private readonly Dictionary<string, List<RoutePartStation>> RouteStations = new();
+	private readonly Dictionary<string, List<RoutePart>> RouteParts = new();
+	private readonly Dictionary<string, List<Train?>> RouteTrains = new();
+	private readonly Dictionary<string, List<Cargo>> RouteCargos = new();
+	private Dictionary<string, string> StationNames = new();
+	private readonly Dictionary<string, (string, string)> RouteClients = new(); // For sender and receiver names
+	private readonly Dictionary<string, PlannedRoute> RoutePlannedRoutes = new(); // For planned routes from RoutePart
+	RailwaysDbContext context = null!; // Initialized in OnInitializedAsync
+
+	protected override async Task OnInitializedAsync()
+	{
+		context = await DbFactory.CreateDbContextAsync();
+		await LoadRoutes();
+	}
+
+	protected override async Task OnAfterRenderAsync(bool firstRender)
+	{
+		if (firstRender)
+		{
+			await InitializeMap();
+		}
+	}
+
+	private async Task InitializeMap()
+	{
+		try
+		{
+			await JS.InvokeVoidAsync("mapInterop.initRoutingMap", "routingMap", _allStations.Select(s => new { s.Id, s.Name, s.Location }).ToList());
+
+			// Display routes if any are selected
+			if (SelectedRoute != null)
+			{
+				await DisplayRouteOnMap(SelectedRoute);
+			}
+		}
+		catch (JSDisconnectedException ex)
+		{
+		}
+	}
+
+	private async Task ProcessRouteRequests()
+	{
+		try
+		{
+			ProcessingMessage = "Обробка запитів на маршрутизацію...";
+			StateHasChanged();
+
+			var createdRoutes = await RoutingService.CreateRoutes();
+
+			// Force a more thorough refresh of routes
+			if (createdRoutes.Any())
+			{
+				ProcessingMessage = $"Створено {createdRoutes.Count()} нових маршрутів. ID першого: {createdRoutes.First().Id}";
+
+				// Force a reload of the context to ensure we're getting fresh data
+				await using var context = await DbFactory.CreateDbContextAsync();
+				var count = await context.Routes.Where(r => !r.IsDeleted).CountAsync();
+				ProcessingMessage += $" Всього активних маршрутів у базі: {count}";
+			}
+			else
+			{
+				ProcessingMessage = "Не було створено нових маршрутів";
+			}
+
+			// Refresh routes from database
+			await LoadRoutes();
+		}
+		catch (Exception ex)
+		{
+			ProcessingMessage = $"Помилка: {ex.Message}";
+			if (ex is AggregateException aex)
+			{
+				ProcessingMessage += $" Деталі: {string.Join("; ", aex.InnerExceptions.Select(e => e.Message))}";
+			}
+		}
+	}
+
+	private async Task LoadRoutes()
+	{
+		try
+		{
+			// Load all stations for reference
+			_allStations = await context.Stations.ToListAsync();
+
+			// Create a lookup for station names
+			StationNames = _allStations.ToDictionary(s => s.Id, s => s.Name);
+
+			// Load all routes with explicit check for IsDeleted = false
+			var query = context.Routes.Where(r => r.IsDeleted == false);
+			var routeCount = await query.CountAsync();
+			Console.WriteLine($"Found {routeCount} non-deleted routes in database");
+
+			Routes = await query.OrderByDescending(r => r.CreatedAtUtc).ToListAsync();
+			Console.WriteLine($"Loaded {Routes.Count} routes to display");
+
+			// Cache related data for each route
+			RouteStations.Clear();
+			RouteTrains.Clear();
+			RouteCargos.Clear();
+			RouteParts.Clear();
+			RouteClients.Clear();
+			RoutePlannedRoutes.Clear();
+
+			foreach (var route in Routes)
+			{
+				// Get route parts for this route using RailRouteRoutePart join table
+				var routeParts = await context.RouteParts
+					.Where(rp => rp.RailRouteRouteParts.Any(rrp => rrp.RailRouteId == route.Id)).Include(routePart => routePart.Train)
+					.ToListAsync();
+
+				RouteParts[route.Id] = routeParts;
+
+				// Get route stations from RouteParts
+				var stations = new List<RoutePartStation>();
+				foreach (var part in routeParts)
+				{
+					var partStations = await context.RouteStations
+						.Where(rs => rs.RoutePartId == part.Id)
+						.ToListAsync();
+					stations.AddRange(partStations);
+				}
+
+				RouteStations[route.Id] = stations;
+				Console.WriteLine($"Route {route.Id} has {stations.Count} stations");
+
+				// Get trains for route - each route part may have a train assigned,  unique list
+				var trainsAssignedForRoute = routeParts.Select(rp => rp.Train).Distinct().ToList();
+				RouteTrains[route.Id] = trainsAssignedForRoute;
+
+				// Get client information
+				var senderName = "-";
+				var receiverName = "-";
+
+				if (routeParts.Any())
+				{
+					// Find the first route request to get client information
+					var firstRoutePart = routeParts.FirstOrDefault();
+					if (firstRoutePart != null)
+					{
+						// Look up RouteRequest using the route's RouteRequestId
+						var request = await context.RouteRequests
+							.Include(rr => rr.SenderClient)
+							.Include(rr => rr.ReceiverClient)
+							.FirstOrDefaultAsync(rr => rr.RouteId == route.Id);
+
+						if (request != null)
+						{
+							senderName = request.SenderClient?.Name ?? "-";
+							receiverName = request.ReceiverClient?.Name ?? "-";
+						}
+
+						// Get planned route from route part
+						if (firstRoutePart.PlannedRoute != null)
+						{
+							RoutePlannedRoutes[route.Id] = firstRoutePart.PlannedRoute;
+						}
+					}
+				}
+
+				RouteClients[route.Id] = (senderName, receiverName);
+
+				// Get cargos for the route
+				// Assuming cargos are linked via RouteRequest, first find the RouteRequest for this route
+				var routeRequest = await context.RouteRequests
+					.FirstOrDefaultAsync(rr => rr.RouteId == route.Id);
+
+				if (routeRequest != null)
+				{
+					var cargos = await context.Cargos
+						.Where(c => c.RouteRequestId == routeRequest.Id)
+						.ToListAsync();
+
+					RouteCargos[route.Id] = cargos;
+				}
+				else
+				{
+					RouteCargos[route.Id] = new List<Cargo>();
+				}
+			}
+
+			// If we have routes but no selection, select the first one
+			if (Routes.Any() && SelectedRoute == null)
+			{
+				await SelectRoute(Routes.First());
+			}
+			else if (SelectedRoute != null)
+			{
+				// Refresh selected route
+				SelectedRoute = Routes.FirstOrDefault(r => r.Id == SelectedRoute.Id);
+				if (SelectedRoute != null)
+				{
+					await DisplayRouteOnMap(SelectedRoute);
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			ProcessingMessage = $"Помилка завантаження маршрутів: {ex.Message}\nStack: {ex.StackTrace}";
+		}
+	}
+
+	private async Task SelectRoute(RailRoute route)
+	{
+		SelectedRoute = route;
+		await DisplayRouteOnMap(route);
+
+		// Add client plant locations to the map
+		await DisplayClientLocationsOnMap(route);
+	}
+
+	private async Task DisplayClientLocationsOnMap(RailRoute route)
+	{
+		try
+		{
+			// Get route parts to find associated route requests
+			if (!RouteParts.ContainsKey(route.Id)) return;
+
+			var routeParts = RouteParts[route.Id];
+			if (!routeParts.Any()) return;
+
+			// Clear any existing client markers first
+			await JS.InvokeVoidAsync("mapInterop.clearClientLocationMarkers", "routingMap");
+
+			// Find the associated route request for this route
+			await using var context = await DbFactory.CreateDbContextAsync();
+
+			var request = await context.RouteRequests
+				.Include(rr => rr.SenderClient)
+				.Include(rr => rr.ReceiverClient)
+				.FirstOrDefaultAsync(rr => rr.RouteId == route.Id);
+
+			if (request == null) return;
+
+			// Add sender client location marker
+			if (request.SenderClient?.Location != null)
+			{
+				await JS.InvokeVoidAsync("mapInterop.setClientLocationMarker",
+					"routingMap",
+					"sender",
+					request.SenderClient.Location);
+			}
+
+			// Add receiver client location marker
+			if (request.ReceiverClient?.Location != null)
+			{
+				await JS.InvokeVoidAsync("mapInterop.setClientLocationMarker",
+					"routingMap",
+					"receiver",
+					request.ReceiverClient.Location);
+			}
+		}
+		catch (Exception ex)
+		{
+			Console.Error.WriteLine($"Error displaying client locations: {ex.Message}");
+		}
+	}
+
+	// Get all locations from all actions in the route
+	private List<Location> GetAllRouteLocations(PlannedRoute plannedRoute)
+	{
+		if (plannedRoute?.Actions == null || !plannedRoute.Actions.Any())
+			return new List<Location>();
+
+		var allLocations = new List<Location>();
+		foreach (var action in plannedRoute.Actions)
+		{
+			if (action.Locations != null && action.Locations.Any())
+			{
+				allLocations.AddRange(action.Locations);
+			}
+		}
+
+		return allLocations;
+	}
+
+	// Get total count of locations across all actions
+	private int GetTotalLocationCount(PlannedRoute plannedRoute)
+	{
+		if (plannedRoute?.Actions == null)
+			return 0;
+
+		return plannedRoute.Actions.Sum(a => a.Locations?.Count ?? 0);
+	}
+
+	private async Task DisplayRouteOnMap(RailRoute route)
+	{
+		try
+		{
+			var points = new List<Location>();
+
+			foreach (var action in context.RailRouteRouteParts.Include(railRouteRoutePart => railRouteRoutePart.RoutePart)
+				         .First(rp => rp.RailRouteId == route.Id).RoutePart.PlannedRoute.Actions)
+			{
+				switch (action)
+				{
+					case StationDepartureAction stationDepartureAction:
+						points.Add(context.Stations.FirstOrDefault(s => s.Id == stationDepartureAction.StationId)?.Location);
+						break;
+					case StationArrivalAction stationArrivalAction:
+						points.Add(context.Stations.FirstOrDefault(s => s.Id == stationArrivalAction.StationId)?.Location);
+						break;
+					case LoadCargoAction loadCargoAction:
+						break;
+					case UnloadCargoAction unloadCargoAction:
+						break;
+					case PickupFromPlantAction pickupFromPlantAction:
+						points.Add(context.RailwaysManagementUsers.FirstOrDefault(u => u.Id == pickupFromPlantAction.ClientId)?.Location);
+						break;
+					case DeliverToPlantAction deliverToPlantAction:
+						points.Add(context.RailwaysManagementUsers.FirstOrDefault(u => u.Id == deliverToPlantAction.ClientId)?.Location);
+						break;
+					case DirectReturnToBaseAction directReturnToBaseAction:
+						break;
+					default:
+						Console.WriteLine($"Unknown action type: {action.GetType().Name}");
+						break;
+				}
+			}
+
+			if (points.Count == 0)
+			{
+				Console.WriteLine("No valid points found for route actions.");
+				return;
+			}
+
+			var openRailRoutingResult = await OpenRailRoutingService.FindRouteAsync(points);
+			var coordinates = openRailRoutingResult?.Coordinates;
+
+			if (coordinates != null && coordinates.Any())
+			{
+				await JS.InvokeVoidAsync("mapInterop.displayRoute", "routingMap", coordinates);
+			}
+		}
+		catch (Exception ex)
+		{
+			Console.WriteLine($"Помилка при відображенні маршруту: {ex.Message}");
+		}
+	}
+
+	private string GetStationName(string stationId)
+	{
+		return StationNames.TryGetValue(stationId, out var name) ? name : stationId;
+	}
+
+	private string GetRouteDistance(RailRoute route)
+	{
+		if (!RoutePlannedRoutes.TryGetValue(route.Id, out var plannedRoute) ||
+		    plannedRoute?.Actions == null || !plannedRoute.Actions.Any())
+			return "Невідомо";
+
+		// Get all locations from all actions
+		var allLocations = GetAllRouteLocations(plannedRoute);
+
+		if (allLocations.Count < 2)
+			return "Невідомо";
+
+		// Calculate rough distance in kilometers
+		double totalDistance = 0;
+
+		for (var i = 0; i < allLocations.Count - 1; i++)
+		{
+			var start = allLocations[i];
+			var end = allLocations[i + 1];
+			totalDistance += CalculateDistance(start.Latitude, start.Longitude, end.Latitude, end.Longitude);
+		}
+
+		return Math.Round(totalDistance, 1).ToString();
+	}
+
+	private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+	{
+		// Convert degrees to radians
+		lat1 = lat1 * Math.PI / 180.0;
+		lon1 = lon1 * Math.PI / 180.0;
+		lat2 = lat2 * Math.PI / 180.0;
+		lon2 = lon2 * Math.PI / 180.0;
+
+		// Haversine formula
+		var dlon = lon2 - lon1;
+		var dlat = lat2 - lat1;
+		var a = Math.Pow(Math.Sin(dlat / 2), 2) + Math.Cos(lat1) * Math.Cos(lat2) * Math.Pow(Math.Sin(dlon / 2), 2);
+		var c = 2 * Math.Asin(Math.Sqrt(a));
+
+		// Radius of earth in kilometers
+		double r = 6371;
+
+		return c * r;
+	}
+
+	private string GetRouteDuration(RailRoute route)
+	{
+		if (route == null)
+			return "Невідомо";
+		if (!route.RailRouteRouteParts.Any())
+			return "Невідомо";
+		// difference between first and last action's expected times
+
+		if (!RoutePlannedRoutes.TryGetValue(route.Id, out var plannedRoute) ||
+		    plannedRoute?.Actions == null || !plannedRoute.Actions.Any())
+			return "Невідомо";
+
+		var firstAction = route.RailRouteRouteParts.First().RoutePart.PlannedRoute.Actions.FirstOrDefault();
+		var lastAction = route.RailRouteRouteParts.Last().RoutePart.PlannedRoute.Actions.LastOrDefault();
+
+		if (firstAction == null || lastAction == null)
+			return "Невідомо";
+
+
+		var duration = lastAction.Time - firstAction.Time;
+		if (duration is null || duration < TimeSpan.Zero)
+			return "Невідомо";
+		return FormatDuration(duration.Value);
+	}
+
+	private string FormatDuration(TimeSpan duration)
+	{
+		if (duration.Days > 0)
+			return $"{duration.Days}д {duration.Hours}г {duration.Minutes}хв";
+		if (duration.Hours > 0)
+			return $"{duration.Hours}г {duration.Minutes}хв";
+		return $"{duration.Minutes}хв";
+	}
+
+	private string GetTrainStatus(Train train, string routeId)
+	{
+		if (!RouteStations.TryGetValue(routeId, out var stations) || !stations.Any())
+			return "Очікує відправлення";
+
+		var currentStation = stations.FirstOrDefault(s => s.StationId == train.StationId);
+		if (currentStation == null)
+			return "Готується до маршруту";
+
+		var firstStation = stations.MinBy(s => s.Order);
+		var lastStation = stations.MaxBy(s => s.Order);
+
+		if (currentStation.StationId == firstStation?.StationId)
+			return "Готовий до відправлення";
+		if (currentStation.StationId == lastStation?.StationId)
+			return "Прибув до кінцевої станції";
+		return "В дорозі";
+	}
+
+	private string GetCargoStatus(Cargo cargo)
+	{
+		return cargo.RouteRequestId != null ? "Призначено до перевезення" : "Очікує призначення";
+	}
+
+	private async Task GenerateRouteReport()
+	{
+		if (SelectedRoute == null) return;
+
+		try
+		{
+			ProcessingMessage = "Генерація звіту про маршрут...";
+			StateHasChanged();
+
+			// Use the service to generate the report - now only passing the route ID
+			var reportData = await RouteReportGenerationService.GenerateRouteReport(SelectedRoute.Id);
+
+			// Download the report
+			var fileName = $"Звіт_про_маршрут_{SelectedRoute.Name ?? SelectedRoute.Id.Substring(0, 8)}_{DateTime.Now:yyyyMMddHHmmss}.docx";
+			await JS.InvokeVoidAsync("downloadFile", fileName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", reportData);
+
+			ProcessingMessage = "Звіт успішно згенеровано";
+		}
+		catch (Exception ex)
+		{
+			ProcessingMessage = $"Помилка при генерації звіту: {ex.Message}";
+			Console.Error.WriteLine($"Помилка генерації звіту: {ex}");
+		}
+	}
+
+	private bool IsLocationNearStation(Location location)
+	{
+		// Check if this location is close to any known station
+		const double proximityThresholdKm = 1.0; // 1 kilometer threshold
+
+		foreach (var station in _allStations)
+		{
+			if (station.Location != null)
+			{
+				var distance = CalculateDistance(
+					location.Latitude,
+					location.Longitude,
+					station.Location.Latitude,
+					station.Location.Longitude);
+
+				if (distance < proximityThresholdKm)
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	private async Task ClearRoutes()
+	{
+		try
+		{
+			ProcessingMessage = "Очищення маршрутів...";
+			StateHasChanged();
+
+			// First, find all planned route requests
+			await using (var context = await DbFactory.CreateDbContextAsync())
+			{
+				var plannedRequests = await context.RouteRequests
+					.Where(rr => rr.IsPlanned && !rr.IsCompleted && !rr.IsDeleted)
+					.ToListAsync();
+
+				if (!plannedRequests.Any())
+				{
+					ProcessingMessage = "Немає запланованих маршрутів для очищення";
+					return;
+				}
+
+				// Get all active routes
+				var activeRoutes = await context.Routes
+					.Where(r => !r.IsDeleted)
+					.ToListAsync();
+
+				if (!activeRoutes.Any())
+				{
+					// If no routes but planned requests exist, just reset the requests
+					foreach (var request in plannedRequests)
+					{
+						request.IsPlanned = false;
+					}
+
+					await context.SaveChangesAsync();
+					ProcessingMessage = $"Скинуто планування для {plannedRequests.Count} запитів";
+					return;
+				}
+
+				// Now reset the planned status on all requests first
+				foreach (var request in plannedRequests)
+				{
+					request.IsPlanned = false;
+				}
+
+				await context.SaveChangesAsync();
+			}
+
+			// Then process route deletion in a separate context
+			await using (var context = await DbFactory.CreateDbContextAsync())
+			{
+				// Get all non-deleted routes
+				var routes = await context.Routes
+					.Where(r => !r.IsDeleted)
+					.ToListAsync();
+
+				if (!routes.Any())
+				{
+					await LoadRoutes();
+					return;
+				}
+
+				var routeIds = routes.Select(r => r.Id).ToList();
+
+				// Delete route-related records using direct SQL to avoid tracking issues
+				// Update the SQL queries to match the correct table structure
+
+				// First delete the join table records since they reference both routes and route parts
+				await context.Database.ExecuteSqlRawAsync(
+					"DELETE FROM RailRouteRouteParts WHERE RailRouteId IN ({0})",
+					string.Join(",", routeIds.Select(id => $"'{id}'")));
+
+				// Get route part IDs that are related to the routes
+				var routePartIds = await context.Set<RailRouteRoutePart>()
+					.Where(rrp => routeIds.Contains(rrp.RailRouteId))
+					.Select(rrp => rrp.RoutePartId)
+					.ToListAsync();
+
+				if (routePartIds.Any())
+				{
+					// Delete route stations associated with these route parts
+					await context.Database.ExecuteSqlRawAsync(
+						"DELETE FROM RoutePartStations WHERE RoutePartId IN ({0})",
+						string.Join(",", routePartIds.Select(id => $"'{id}'")));
+
+					// Delete route parts
+					await context.Database.ExecuteSqlRawAsync(
+						"DELETE FROM RouteParts WHERE Id IN ({0})",
+						string.Join(",", routePartIds.Select(id => $"'{id}'")));
+				}
+
+				// Mark routes as deleted
+				foreach (var route in routes)
+				{
+					route.IsDeleted = true;
+					route.LastModifiedAtUtc = DateTime.UtcNow;
+				}
+
+				await context.SaveChangesAsync();
+
+				// Clear UI selection
+				SelectedRoute = null;
+
+				// Refresh the UI
+				ProcessingMessage = $"Очищено {routes.Count} маршрутів";
+				await LoadRoutes();
+
+				// Clear the map
+				await JS.InvokeVoidAsync("mapInterop.clearRoute", "routingMap");
+			}
+		}
+		catch (Exception ex)
+		{
+			ProcessingMessage = $"Помилка очищення маршрутів: {ex.Message}";
+		}
+	}
+}

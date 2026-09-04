@@ -1,0 +1,60 @@
+@page "/stations/delete"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Видалити станцію</PageTitle>
+
+<h1>Видалити станцію</h1>
+
+<p>Ви впевнені, що хочете видалити цю станцію?</p>
+<div>
+    <h2>Деталі станції</h2>
+    <hr />
+    <StationDetails Station="station" />
+    @if (station is not null)
+    {
+        <EditForm method="post" Model="station" OnValidSubmit="DeleteStation" FormName="delete" Enhance>
+            <button type="submit" class="btn btn-danger" disabled="@(station is null)">Видалити</button> |
+            <a href="/stations">Повернутися до списку</a>
+        </EditForm>
+    }
+</div>
+
+@code {
+    private Station? station;
+
+    [SupplyParameterFromQuery]
+    private string? Id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+
+        using var context = DbFactory.CreateDbContext();
+        station = await context.Stations
+            .FirstOrDefaultAsync(m => m.Id == Id);
+
+        if (station is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+        }
+    }
+
+    private async Task DeleteStation()
+    {
+        using var context = DbFactory.CreateDbContext();
+        var entity = await context.Stations.FirstOrDefaultAsync(s => s.Id == station!.Id);
+        if (entity is not null)
+        {
+            context.Stations.Remove(entity);
+            await context.SaveChangesAsync();
+        }
+        NavigationManager.NavigateTo("/stations");
+    }
+}

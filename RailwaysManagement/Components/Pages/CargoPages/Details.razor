@@ -1,0 +1,48 @@
+﻿@page "/cargos/details"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Деталі вантажу</PageTitle>
+
+<h1>Деталі вантажу</h1>
+
+<div>
+    <h2>Вантаж</h2>
+    <hr />
+    <CargoDetails Cargo="cargo" />
+    @if (cargo is not null)
+    {
+        <div>
+            <a href="@($"/cargos/edit?id={cargo.Id}")">Редагувати</a> |
+            <a href="@($"/cargos")">Повернутися до списку</a>
+        </div>
+    }
+</div>
+
+	@code {
+    private Cargo? cargo;
+
+    [SupplyParameterFromQuery]
+    private string Id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var context = DbFactory.CreateDbContext();
+        cargo = await context.Cargos
+			.Include(c => c.RouteRequest)
+			.ThenInclude(c => c.SenderClient)
+			.ThenInclude(cl => cl.AssignedStation)
+			.Include(c => c.RouteRequest)
+			.ThenInclude(c => c.ReceiverClient)
+			.Include(c => c.RouteRequest)
+			.ThenInclude(c => c.Route)
+            .FirstOrDefaultAsync(m => m.Id == Id);
+        if (cargo is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+    }
+}

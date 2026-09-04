@@ -1,0 +1,129 @@
+﻿@page "/routerequests/details"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@using RailwaysManagement.Services
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+@inject RouteReportGenerationService RouteReportGenerationService
+@inject IJSRuntime JS
+
+<PageTitle>Деталі запиту на маршрут</PageTitle>
+
+<div class="card mb-4">
+	<div class="card-header">
+		<h2 class="mb-0">Запит на маршрут</h2>
+	</div>
+	<div class="card-body">
+		<RouteRequestDetails RouteRequest="routerequest" />
+		
+		@if (routerequest?.Route != null)
+		{
+			<div class="mt-4">
+				<h4>Інформація про маршрут</h4>
+				<div class="alert alert-success">
+					<i class="bi bi-check-circle-fill me-2"></i>
+					Для цього запиту створено маршрут
+				</div>
+				<button @onclick="GenerateRouteReport" class="btn btn-primary">
+					<i class="bi bi-file-earmark-text me-1"></i> Завантажити звіт маршруту
+				</button>
+				@if (!string.IsNullOrEmpty(reportMessage))
+				{
+					<div class="alert @(reportError ? "alert-danger" : "alert-info") mt-2">
+						@reportMessage
+					</div>
+				}
+			</div>
+		}
+	</div>
+	@if (routerequest is not null)
+	{
+		<div class="card-footer">
+			<div class="btn-group" role="group">
+				<a href="@($"/routerequests/edit?id={routerequest.Id}")" class="btn btn-warning">
+					<i class="bi bi-pencil"></i> Редагувати
+				</a>
+				<a href="/routerequests" class="btn btn-secondary">
+					<i class="bi bi-arrow-left"></i> Повернутися до списку
+				</a>
+			</div>
+		</div>
+	}
+</div>
+
+<script>
+	window.downloadFile = function(filename, contentType, data) {
+		const blob = new Blob([data], { type: contentType });
+		const url = window.URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		setTimeout(() => {
+				document.body.removeChild(a);
+				window.URL.revokeObjectURL(url);
+			},
+			100);
+	}
+</script>
+
+@code {
+	private RouteRequest? routerequest;
+	private List<Cargo> cargos = new();
+	private string? reportMessage;
+	private bool reportError = false;
+
+	[SupplyParameterFromQuery]
+	private string Id { get; set; }
+
+	protected override async Task OnInitializedAsync()
+	{
+		using var context = DbFactory.CreateDbContext();
+		routerequest = await context.RouteRequests
+			.Include(r => r.Route)
+			.Include(r => r.Cargos)
+			.Include(r => r.SenderClient)
+			.Include(r => r.ReceiverClient)
+			.FirstOrDefaultAsync(m => m.Id == Id);
+
+		if (routerequest is null)
+		{
+			NavigationManager.NavigateTo("notfound");
+			return;
+		}
+	}
+
+	private async Task GenerateRouteReport()
+	{
+		if (routerequest?.Route == null) return;
+
+		try
+		{
+			reportMessage = "Генерація звіту про маршрут...";
+			reportError = false;
+			StateHasChanged();
+
+			// Use the service to generate the report - passing the route ID
+			var reportData = await RouteReportGenerationService.GenerateRouteReport(routerequest.Route.Id);
+
+			// Generate a file name based on route info
+			var routeName = string.IsNullOrEmpty(routerequest.Route.Name) 
+				? $"Маршрут_{routerequest.Route.Id.Substring(0, 8)}" 
+				: routerequest.Route.Name;
+			
+			var fileName = $"Звіт_про_маршрут_{routeName}_{DateTime.Now:yyyyMMddHHmmss}.docx";
+			
+			// Download the report
+			await JS.InvokeVoidAsync("downloadFile", fileName, 
+				"application/vnd.openxmlformats-officedocument.wordprocessingml.document", reportData);
+
+			reportMessage = "Звіт успішно згенеровано";
+		}
+		catch (Exception ex)
+		{
+			reportMessage = $"Помилка при генерації звіту: {ex.Message}";
+			reportError = true;
+		}
+	}
+}

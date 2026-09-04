@@ -1,0 +1,110 @@
+﻿@page "/cargos/edit"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Редагувати</PageTitle>
+
+<h1>Редагувати</h1>
+
+<h2>Вантаж</h2>
+<hr />
+@if (Cargo is null)
+{
+    <p><em>Завантаження...</em></p>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-4">
+            <EditForm Model="Cargo" OnValidSubmit="UpdateCargo">
+                <DataAnnotationsValidator />
+                <ValidationSummary role="alert"/>
+                <input type="hidden" name="Cargo.Id" value="@Cargo.Id" />
+                <div class="mb-3">
+	                <label for="name" class="form-label">Назва:</label>
+	                <InputText id="name" @bind-Value="Cargo.Name" class="form-control" aria-required="true" />
+	                <ValidationMessage For="() => Cargo.Name" class="text-danger" />
+				</div>
+                <div class="mb-3">
+                    <label for="wagonscount" class="form-label">Кількість вагонів:</label>
+                    <InputNumber id="wagonscount" @bind-Value="Cargo.WagonsCount" class="form-control" />
+                    <ValidationMessage For="() => Cargo.WagonsCount" class="text-danger" />
+                </div>
+                <button type="submit" class="btn btn-primary">Зберегти</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+<div>
+    <a href="/cargos">Повернутися до списку</a>
+</div>
+
+@code {
+    [SupplyParameterFromQuery]
+    private string? Id { get; set; }
+
+    private Cargo? Cargo { get; set; }
+
+    // Use RailwaysManagementUser for clients, filter by UserRole.Client
+    private List<RailwaysManagementUser> Clients { get; set; } = new();
+    private List<Station> Stations { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrEmpty(Id))
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+
+        using var context = DbFactory.CreateDbContext();
+		Cargo = await context.Cargos.Where(cargo => cargo.Id == Id)
+			.Include(c => c.RouteRequest)
+			.ThenInclude(rr => rr.DeliveryDeadlineDate)
+			.AsNoTracking()
+			.FirstOrDefaultAsync();
+
+        if (Cargo is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+
+        // Filter users by UserRole.Client
+        Clients = await context.RailwaysManagementUsers.Where(user => user.Role == UserRole.Client).ToListAsync();
+        Stations = await context.Stations.ToListAsync();
+    }
+
+    private async Task UpdateCargo()
+    {
+        using var context = DbFactory.CreateDbContext();
+        context.Attach(Cargo!).State = EntityState.Modified;
+
+        try
+        {
+            await context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            if (!CargoExists(Cargo!.Id))
+            {
+                NavigationManager.NavigateTo("notfound");
+            }
+            else
+            {
+                throw;
+            }
+        }
+
+        NavigationManager.NavigateTo("/cargos");
+    }
+
+    private bool CargoExists(string id)
+    {
+        using var context = DbFactory.CreateDbContext();
+        return context.Cargos.Any(e => e.Id == id);
+    }
+}

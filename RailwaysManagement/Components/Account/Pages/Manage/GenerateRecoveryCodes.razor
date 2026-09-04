@@ -1,0 +1,67 @@
+﻿@page "/Account/Manage/GenerateRecoveryCodes"
+
+@using Microsoft.AspNetCore.Identity
+@using RailwaysManagement.DbModels
+
+@inject UserManager<RailwaysManagementUser> UserManager
+@inject IdentityUserAccessor UserAccessor
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<GenerateRecoveryCodes> Logger
+
+<PageTitle>Генерувати коди відновлення для двофакторної автентифікації (2FA)</PageTitle>
+
+@if (recoveryCodes is not null)
+{
+    <ShowRecoveryCodes RecoveryCodes="recoveryCodes.ToArray()" StatusMessage="@message" />
+}
+else
+{
+    <h3>Генерувати коди відновлення для 2FA</h3>
+    <div class="alert alert-warning" role="alert">
+        <p>
+            <span class="glyphicon glyphicon-warning-sign"></span>
+            <strong>Збережіть ці коди у безпечному місці.</strong>
+        </p>
+        <p>
+            Якщо ви втратите пристрій і не матимете кодів відновлення, ви втратите доступ до облікового запису.
+        </p>
+        <p>
+            Генерація нових кодів відновлення не змінює ключі, які використовуються у додатках-аутентифікаторах. Якщо ви хочете змінити ключ, використаний у додатку-аутентифікаторі, вам слід <a href="Account/Manage/ResetAuthenticator">скинути ключі аутентифікатора.</a>
+        </p>
+    </div>
+    <div>
+        <form @formname="generate-recovery-codes" @onsubmit="OnSubmitAsync" method="post">
+            <AntiforgeryToken />
+            <button class="btn btn-danger" type="submit">Згенерувати коди відновлення</button>
+        </form>
+    </div>
+}
+
+@code {
+    private string? message;
+    private RailwaysManagementUser user = default!;
+    private IEnumerable<string>? recoveryCodes;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = await UserAccessor.GetRequiredUserAsync(HttpContext);
+
+        var isTwoFactorEnabled = await UserManager.GetTwoFactorEnabledAsync(user);
+        if (!isTwoFactorEnabled)
+        {
+            throw new InvalidOperationException("Cannot generate recovery codes for user because they do not have 2FA enabled.");
+        }
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        var userId = await UserManager.GetUserIdAsync(user);
+        recoveryCodes = await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+        message = "Ви згенерували нові коди відновлення.";
+
+        Logger.LogInformation("User with ID '{UserId}' has generated new 2FA recovery codes.", userId);
+    }
+}

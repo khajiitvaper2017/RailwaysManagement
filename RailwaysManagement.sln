@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35931.197
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RailwaysManagement", "RailwaysManagement\RailwaysManagement.csproj", "{62103541-AD6C-4D82-940B-FC19FC74D258}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IO.Swagger", "IO.Swagger\IO.Swagger.csproj", "{DACB47B6-DB2E-792F-3E9C-652AB78657D0}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{62103541-AD6C-4D82-940B-FC19FC74D258}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{62103541-AD6C-4D82-940B-FC19FC74D258}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{62103541-AD6C-4D82-940B-FC19FC74D258}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{62103541-AD6C-4D82-940B-FC19FC74D258}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DACB47B6-DB2E-792F-3E9C-652AB78657D0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DACB47B6-DB2E-792F-3E9C-652AB78657D0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DACB47B6-DB2E-792F-3E9C-652AB78657D0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DACB47B6-DB2E-792F-3E9C-652AB78657D0}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C67FE9EA-748C-4F24-9675-3D66EAB691E8}
+	EndGlobalSection
+EndGlobal

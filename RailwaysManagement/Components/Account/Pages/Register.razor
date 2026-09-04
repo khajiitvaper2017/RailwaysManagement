@@ -1,0 +1,188 @@
+﻿@page "/Account/Register"
+
+@using System.ComponentModel.DataAnnotations
+@using System.Text
+@using System.Text.Encodings.Web
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using RailwaysManagement.DbModels
+
+@inject UserManager<RailwaysManagementUser> UserManager
+@inject IUserStore<RailwaysManagementUser> UserStore
+@inject SignInManager<RailwaysManagementUser> SignInManager
+@inject IEmailSender<RailwaysManagementUser> EmailSender
+@inject ILogger<Register> Logger
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+@inject RoleManager<IdentityRole> RoleManager
+
+<PageTitle>Реєстрація</PageTitle>
+
+<h1>Реєстрація</h1>
+
+<div class="row">
+    <div class="col-md-4">
+        <StatusMessage Message="@Message" />
+        <EditForm Model="Input" asp-route-returnUrl="@ReturnUrl" method="post" OnValidSubmit="RegisterUser" FormName="register">
+            <DataAnnotationsValidator />
+            <h2>Створіть новий обліковий запис.</h2>
+            <hr />
+            <ValidationSummary class="text-danger" role="alert" />
+            <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.Email" class="form-control" autocomplete="username" aria-required="true" placeholder="name@example.com" />
+                <label for="email">Електронна пошта</label>
+                <ValidationMessage For="() => Input.Email" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.Name" class="form-control" autocomplete="name" aria-required="true" placeholder="Повне ім'я" />
+                <label for="name">Повне ім'я</label>
+                <ValidationMessage For="() => Input.Name" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3" hidden="true">
+                <InputSelect @bind-Value="Input.Role" class="form-control" aria-required="true">
+                    @foreach (var role in Enum.GetValues<UserRole>())
+                    {
+                        <option value="@role">@role</option>
+                    }
+                </InputSelect>
+                <label for="role">Роль</label>
+                <ValidationMessage For="() => Input.Role" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputText type="password" @bind-Value="Input.Password" class="form-control" autocomplete="new-password" aria-required="true" placeholder="пароль" />
+                <label for="password">Пароль</label>
+                <ValidationMessage For="() => Input.Password" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputText type="password" @bind-Value="Input.ConfirmPassword" class="form-control" autocomplete="new-password" aria-required="true" placeholder="пароль" />
+                <label for="confirm-password">Підтвердіть пароль</label>
+                <ValidationMessage For="() => Input.ConfirmPassword" class="text-danger" />
+            </div>
+            <button type="submit" class="w-100 btn btn-lg btn-primary">Зареєструватися</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private IEnumerable<IdentityError>? identityErrors;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string? Message => identityErrors is null ? null : $"Помилка: {string.Join(", ", identityErrors.Select(error => error.Description))}";
+    public async Task RegisterUser(EditContext editContext)
+    {
+        var user = CreateUser();
+
+        await UserStore.SetUserNameAsync(user, Input.Email, CancellationToken.None);
+        var emailStore = GetEmailStore();
+        await emailStore.SetEmailAsync(user, Input.Email, CancellationToken.None);
+
+        // Set new fields
+        user.Name = Input.Name;
+        user.Role = Input.Role;
+
+        var result = await UserManager.CreateAsync(user, Input.Password);
+
+        if (!result.Succeeded)
+        {
+            identityErrors = result.Errors;
+            return;
+        }
+
+        // Reload user from DB to ensure it's tracked and has an Id
+        var createdUser = await UserManager.FindByEmailAsync(Input.Email);
+        if (createdUser == null)
+        {
+            identityErrors = new[] { new IdentityError { Description = "Не вдалося створити користувача." } };
+            return;
+        }
+
+        // Ensure role exists
+        if (!await RoleManager.RoleExistsAsync(user.Role.ToString()))
+        {
+            await RoleManager.CreateAsync(new IdentityRole(user.Role.ToString()));
+        }
+        var roleResult = await UserManager.AddToRoleAsync(createdUser, user.Role.ToString());
+        if (!roleResult.Succeeded)
+        {
+            identityErrors = roleResult.Errors;
+            return;
+        }
+
+        Logger.LogInformation("Користувач створив новий обліковий запис із паролем.");
+
+        var userId = await UserManager.GetUserIdAsync(createdUser);
+        var code = await UserManager.GenerateEmailConfirmationTokenAsync(createdUser);
+        code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+        var callbackUrl = NavigationManager.GetUriWithQueryParameters(
+            NavigationManager.ToAbsoluteUri("Account/ConfirmEmail").AbsoluteUri,
+            new Dictionary<string, object?> { ["userId"] = userId, ["code"] = code, ["returnUrl"] = ReturnUrl });
+
+        await EmailSender.SendConfirmationLinkAsync(createdUser, Input.Email, HtmlEncoder.Default.Encode(callbackUrl));
+
+        if (UserManager.Options.SignIn.RequireConfirmedAccount)
+        {
+            RedirectManager.RedirectTo(
+                "Account/RegisterConfirmation",
+                new() { ["email"] = Input.Email, ["returnUrl"] = ReturnUrl });
+        }
+
+        await SignInManager.SignInAsync(createdUser, isPersistent: false);
+        RedirectManager.RedirectTo(ReturnUrl);
+    }
+
+    private RailwaysManagementUser CreateUser()
+    {
+        try
+        {
+            return Activator.CreateInstance<RailwaysManagementUser>();
+        }
+        catch
+        {
+            throw new InvalidOperationException($"Не вдалося створити екземпляр '{nameof(RailwaysManagementUser)}'. " +
+                $"Переконайтеся, що '{nameof(RailwaysManagementUser)}' не є абстрактним класом і має конструктор без параметрів.");
+        }
+    }
+
+    private IUserEmailStore<RailwaysManagementUser> GetEmailStore()
+    {
+        if (!UserManager.SupportsUserEmail)
+        {
+            throw new NotSupportedException("Інтерфейс за замовчуванням вимагає сховище користувачів із підтримкою електронної пошти.");
+        }
+        return (IUserEmailStore<RailwaysManagementUser>)UserStore;
+    }
+
+    private sealed class InputModel
+    {
+        [Required(ErrorMessage = "Поле електронної пошти є обов'язковим.")]
+        [EmailAddress(ErrorMessage = "Введіть коректну електронну пошту.")]
+        [Display(Name = "Електронна пошта")]
+        public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Поле повного імені є обов'язковим.")]
+        [StringLength(100, ErrorMessage = "{0} має містити не менше {2} і не більше {1} символів.", MinimumLength = 2)]
+        [Display(Name = "Повне ім'я")]
+        public string Name { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Оберіть роль.")]
+        [Display(Name = "Роль")]
+        public UserRole Role { get; set; } = UserRole.Client;
+
+        [Required(ErrorMessage = "Поле пароля є обов'язковим.")]
+        [StringLength(100, ErrorMessage = "{0} має містити не менше {2} і не більше {1} символів.", MinimumLength = 6)]
+        [DataType(DataType.Password)]
+        [Display(Name = "Пароль")]
+        public string Password { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Підтвердіть пароль.")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Підтвердіть пароль")]
+        [Compare("Password", ErrorMessage = "Паролі не співпадають.")]
+        public string ConfirmPassword { get; set; } = string.Empty;
+    }
+}

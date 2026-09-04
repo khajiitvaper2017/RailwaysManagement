@@ -1,0 +1,208 @@
+﻿@page "/routerequests/edit"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Редагування</PageTitle>
+
+<h1>Редагування</h1>
+
+<h2>Запит на маршрут</h2>
+<hr />
+@if (RouteRequest is null)
+{
+    <p><em>Завантаження...</em></p>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-4">
+            <EditForm method="post" Model="RouteRequest" OnValidSubmit="UpdateRouteRequest" FormName="edit" Enhance>
+                <DataAnnotationsValidator />
+                <ValidationSummary role="alert"/>
+                <input type="hidden" name="RouteRequest.Id" value="@RouteRequest.Id" />
+                <div class="mb-3">
+                    <label for="deliveryDeadline" class="form-label">Термін доставки:</label>
+                    <InputDate id="deliveryDeadline" @bind-Value="RouteRequest.DeliveryDeadlineDate" class="form-control" />
+                    <ValidationMessage For="() => RouteRequest.DeliveryDeadlineDate" class="text-danger" />
+                </div>
+                <div class="mb-3">
+                    <label for="ShipmentDate" class="form-label">Дата відвантаження</label>
+                    <InputDate id="ShipmentDate" @bind-Value="RouteRequest.ShipmentDate" class="form-control" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Заплановано:</label>
+                    <InputCheckbox @bind-Value="RouteRequest.IsPlanned" class="form-check-input" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Завершено:</label>
+                    <InputCheckbox @bind-Value="RouteRequest.IsCompleted" class="form-check-input" />
+                </div>
+                <div class="mb-3">
+                    <label for="fromClient" class="form-label">Відправник (клієнт):</label>
+                    <InputSelect id="fromClient" @bind-Value="RouteRequest.SenderClientId" class="form-control" required>
+                        <option value="">Оберіть клієнта</option>
+                        @foreach (var client in Clients)
+                        {
+                            <option value="@client.Id">@client.UserName</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => RouteRequest.SenderClientId" class="text-danger" />
+                </div>
+                <div class="mb-3">
+                    <label for="toClient" class="form-label">Одержувач (клієнт):</label>
+                    <InputSelect id="toClient" @bind-Value="RouteRequest.ReceiverClientId" class="form-control" required>
+                        <option value="">Оберіть клієнта</option>
+                        @foreach (var client in Clients)
+                        {
+                            <option value="@client.Id">@client.UserName</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => RouteRequest.ReceiverClientId" class="text-danger" />
+                </div>
+                <button type="submit" class="btn btn-primary">Зберегти</button>
+            </EditForm>
+        </div>
+        <div class="col-md-8">
+            <h4>Вантажі</h4>
+            @if (RouteRequest.Cargos.Any())
+            {
+                <ul>
+                    @foreach (var cargo in RouteRequest.Cargos)
+                    {
+						<li>@cargo.Id: @cargo.WagonsCount вагон(ів)</li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <p>Вантажі не додані.</p>
+            }
+            <h4>Частини маршруту</h4>
+            @if (RouteParts.Any())
+            {
+                <ul>
+                    @foreach (var routePart in RouteParts)
+                    {
+                        <li>
+                            @if (RoutePartRoutes.TryGetValue(routePart.Id, out var route))
+                            {
+                                <span>Маршрут: @(route?.Name ?? "Невідомий маршрут")</span>
+                            }
+                            else
+                            {
+                                <span>Маршрут: Невідомий маршрут</span>
+                            }
+                            <span>, Порядок: @(RoutePartOrders.TryGetValue(routePart.Id, out var order) ? order : 0)</span>
+                        </li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <p>Частини маршруту не додані.</p>
+            }
+        </div>
+    </div>
+}
+
+<div>
+    <a class="button-link" href="/routerequests">Повернутися до списку</a>
+</div>
+
+@code {
+    [SupplyParameterFromQuery]
+    private string Id { get; set; }
+
+    private RouteRequest? RouteRequest { get; set; }
+    private List<RoutePart> RouteParts { get; set; } = new();
+    private Dictionary<string, RailRoute> RoutePartRoutes { get; set; } = new();
+    private Dictionary<string, int> RoutePartOrders { get; set; } = new();
+
+    private List<Station> Stations { get; set; } = new();
+    private List<RailwaysManagementUser> Clients { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+	    await using var context = await DbFactory.CreateDbContextAsync();
+        Stations = await context.Stations.OrderBy(s => s.Name).ToListAsync();
+        Clients = await context.RailwaysManagementUsers
+            .Where(u => u.Role == UserRole.Client)
+            .OrderBy(u => u.Name)
+            .ToListAsync();
+
+        RouteRequest = await context.RouteRequests
+            .Include(r => r.Cargos)
+            .FirstOrDefaultAsync(m => m.Id == Id);
+
+        if (RouteRequest is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+
+        // Load route parts associated with this route request through the Route
+        if (RouteRequest.RouteId != null)
+        {
+            // Get route parts through the RailRouteRoutePart join table
+            var railRouteRouteParts = await context.Set<RailRouteRoutePart>()
+                .Where(rrp => rrp.RailRouteId == RouteRequest.RouteId)
+                .OrderBy(rrp => rrp.OrderInRailRoute)
+                .ToListAsync();
+
+            var routePartIds = railRouteRouteParts.Select(rrp => rrp.RoutePartId).ToList();
+            
+            // Store the order information
+            foreach (var rrp in railRouteRouteParts)
+            {
+                RoutePartOrders[rrp.RoutePartId] = rrp.OrderInRailRoute;
+            }
+
+            // Get the route parts
+            RouteParts = await context.RouteParts
+                .Where(rp => routePartIds.Contains(rp.Id))
+                .ToListAsync();
+
+            // Get associated routes for display
+            foreach (var rrp in railRouteRouteParts)
+            {
+                var route = await context.Routes.FirstOrDefaultAsync(r => r.Id == rrp.RailRouteId);
+                if (route != null)
+                {
+                    RoutePartRoutes[rrp.RoutePartId] = route;
+                }
+            }
+        }
+    }
+
+    private async Task UpdateRouteRequest()
+    {
+        using var context = DbFactory.CreateDbContext();
+        context.Attach(RouteRequest!).State = EntityState.Modified;
+
+        try
+        {
+            await context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            if (!RouteRequestExists(RouteRequest!.Id))
+            {
+                NavigationManager.NavigateTo("notfound");
+            }
+            else
+            {
+                throw;
+            }
+        }
+
+        NavigationManager.NavigateTo("/routerequests");
+    }
+
+    private bool RouteRequestExists(string id)
+    {
+        using var context = DbFactory.CreateDbContext();
+        return context.RouteRequests.Any(e => e.Id == id);
+    }
+}

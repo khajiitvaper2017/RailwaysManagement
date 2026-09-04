@@ -1,0 +1,60 @@
+﻿@page "/cargos/create"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Створити</PageTitle>
+
+<h1>Створити</h1>
+
+<h2>Вантаж</h2>
+<hr />
+<div class="row">
+    <div class="col-md-4">
+        <EditForm Model="Cargo" OnValidSubmit="AddCargo">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" role="alert"/>
+            <div class="mb-3">
+                <label for="name" class="form-label">Назва:</label>
+                <InputText id="name" @bind-Value="Cargo.Name" class="form-control" aria-required="true"/>
+                <ValidationMessage For="() => Cargo.Name" class="text-danger" />
+                </div>
+            <div class="mb-3">
+                <label for="wagonscount" class="form-label">Кількість вагонів:</label>
+                <InputNumber id="wagonscount" @bind-Value="Cargo.WagonsCount" class="form-control" />
+                <ValidationMessage For="() => Cargo.WagonsCount" class="text-danger" />
+            </div>
+            <div class="mb-3">
+                <label for="scheduleddeliverydate" class="form-label">Дата доставки:</label>
+                <InputDate id="scheduleddeliverydate" @bind-Value="Cargo.RouteRequest.DeliveryDeadlineDate" class="form-control" />
+                <ValidationMessage For="() => Cargo.RouteRequest.DeliveryDeadlineDate" class="text-danger" />
+            </div>
+            <button type="submit" class="btn btn-primary">Створити</button>
+        </EditForm>
+    </div>
+</div>
+
+<div>
+    <a href="/cargos">Повернутися до списку</a>
+</div>
+
+@code {
+    private Cargo Cargo { get; set; } = new();
+
+    private List<Station> Stations { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var context = DbFactory.CreateDbContext();
+        Stations = await context.Stations.AsNoTracking().ToListAsync();
+    }
+
+    private async Task AddCargo()
+    {
+        using var context = DbFactory.CreateDbContext();
+        context.Cargos.Add(Cargo);
+        await context.SaveChangesAsync();
+        NavigationManager.NavigateTo("/cargos");
+    }
+}

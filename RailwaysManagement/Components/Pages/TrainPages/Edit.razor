@@ -1,0 +1,215 @@
+﻿@page "/trains/edit"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+
+<PageTitle>Редагування потяга</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Редагування потяга</h1>
+    <a href="/trains" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Повернутися до списку
+    </a>
+</div>
+
+@if (Train is null)
+{
+    <div class="d-flex justify-content-center my-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Завантаження...</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-md-5">
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="card-title mb-0">Форма редагування</h5>
+                </div>
+                <div class="card-body">
+                    <EditForm method="post" Model="Train" OnValidSubmit="UpdateTrain" FormName="edit" Enhance>
+                        <DataAnnotationsValidator />
+                        <ValidationSummary role="alert" class="alert alert-danger" />
+                        <input type="hidden" name="Train.Id" value="@Train.Id" />
+
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Назва:</label>
+                            <InputText id="name" @bind-Value="Train.Name" class="form-control" aria-required="true" />
+                            <ValidationMessage For="() => Train.Name" class="text-danger" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="maxcarscount" class="form-label">Максимальна кількість вагонів:</label>
+                            <InputNumber id="maxcarscount" @bind-Value="Train.MaxCarsCount" class="form-control" />
+                            <ValidationMessage For="() => Train.MaxCarsCount" class="text-danger" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="stationid" class="form-label">Станція:</label>
+                            <div class="input-group">
+                                <InputSelect id="stationid" @bind-Value="Train.StationId" class="form-select">
+                                    <option value="">Оберіть станцію</option>
+                                    @if (Stations is not null)
+                                    {
+                                        @foreach (var station in Stations)
+                                        {
+                                            <option value="@station.Id">@station.Name (@station.Location?.ToString())</option>
+                                        }
+                                    }
+                                </InputSelect>
+                                <button type="button" class="btn btn-outline-secondary" @onclick="ToggleMap">
+                                    <i class="bi bi-map"></i> @(isMapVisible ? "Сховати карту" : "Показати карту")
+                                </button>
+                            </div>
+                            <ValidationMessage For="() => Train.StationId" class="text-danger" />
+                        </div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-save"></i> Зберегти
+                            </button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-7">
+            @if (isMapVisible)
+            {
+                <div class="card shadow-sm">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="card-title mb-0">Виберіть станцію на карті</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="train-station-map" style="height:400px;"></div>
+                    </div>
+                    <div class="card-footer bg-light">
+                        @if (selectedStation != null)
+                        {
+                            <div class="text-success">
+                                <strong>Вибрано:</strong> @selectedStation.Name
+                                <span class="text-muted">(@selectedStation.Location?.Latitude, @selectedStation.Location?.Longitude)</span>
+                            </div>
+                        }
+                        else if (!string.IsNullOrEmpty(Train.StationId))
+                        {
+                            <div class="text-info">
+                                <strong>Поточна станція:</strong> @Stations?.FirstOrDefault(s => s.Id == Train.StationId)?.Name
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-warning">
+                                <i class="bi bi-info-circle"></i> Натисніть на станцію на карті, щоб вибрати її
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery]
+    private string Id { get; set; }
+
+    [SupplyParameterFromForm]
+    private Train? Train { get; set; }
+
+    private List<Station>? Stations;
+    private bool isMapVisible = false;
+    private Station? selectedStation;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var context = DbFactory.CreateDbContext();
+        Train ??= await context.Trains.FirstOrDefaultAsync(m => m.Id == Id);
+        Stations = await context.Stations.ToListAsync();
+
+        if (Train is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+        }
+        else if (!string.IsNullOrEmpty(Train.StationId))
+        {
+            selectedStation = Stations?.FirstOrDefault(s => s.Id == Train.StationId);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (isMapVisible && Stations != null)
+        {
+            // Format stations data for the map
+            var stationsData = Stations
+                .Where(s => s.Location != null && s.Location.Latitude != 0 && s.Location.Longitude != 0)
+                .Select(s => new
+                {
+                    s.Id,
+                    s.Name,
+                    s.Location.Latitude,
+                    s.Location.Longitude
+                })
+                .ToList();
+
+            // Initialize the map
+            await JS.InvokeVoidAsync(
+                "mapInterop.initTrainStationMap",
+                "train-station-map",
+                stationsData,
+                DotNetObjectReference.Create(this),
+                Train?.StationId
+            );
+        }
+    }
+
+    private void ToggleMap()
+    {
+        isMapVisible = !isMapVisible;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void StationSelected(string stationId)
+    {
+        if (Train == null)
+        {
+            return;
+        }
+
+        Train.StationId = stationId;
+        selectedStation = Stations?.FirstOrDefault(s => s.Id == stationId);
+
+        StateHasChanged();
+    }
+
+    private async Task UpdateTrain()
+    {
+        using var context = DbFactory.CreateDbContext();
+		var existingTrain = await context.Trains.FindAsync(Train.Id);
+        if (existingTrain == null)
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+		existingTrain.Name = Train.Name;
+        existingTrain.MaxCarsCount = Train.MaxCarsCount;
+        existingTrain.StationId = Train.StationId;
+		context.Trains.Update(existingTrain);
+		await context.SaveChangesAsync();
+
+        NavigationManager.NavigateTo("/trains");
+    }
+
+    private bool TrainExists(string id)
+    {
+        using var context = DbFactory.CreateDbContext();
+        return context.Trains.Any(e => e.Id == id);
+    }
+}

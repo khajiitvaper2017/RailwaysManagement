@@ -1,0 +1,42 @@
+﻿@page "/trains/details"
+@using Microsoft.EntityFrameworkCore
+@using RailwaysManagement.DbModels
+@inject IDbContextFactory<RailwaysDbContext> DbFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Деталі потяга</PageTitle>
+
+<h1>Деталі потяга</h1>
+
+<div>
+    <h2>Потяг</h2>
+    <hr />
+    <TrainDetails Train="train" />
+    @if (train is not null)
+    {
+        <div>
+            <a href="@($"/trains/edit?id={train.Id}")">Редагувати</a> |
+            <a href="@($"/trains")">Повернутися до списку</a>
+        </div>
+    }
+</div>
+
+@code {
+    private Train? train;
+
+    [SupplyParameterFromQuery]
+    private string Id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var context = DbFactory.CreateDbContext();
+        train = await context.Trains
+            .Include(t => t.Station)
+            .FirstOrDefaultAsync(m => m.Id == Id);
+        if (train is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+            return;
+        }
+    }
+}
